@@ -1,0 +1,6 @@
+{
+  "name": "TowerCam",
+  "description": "Lightweight camera app for telecom tower technicians with real-time GPS watermarks and smart Firestore site logging",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

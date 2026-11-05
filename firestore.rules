@@ -1,0 +1,37 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 100 && !id.matches('.*[/].*');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function isValidTowerLocation(data) {
+      return data.site_code is string && data.site_code.size() > 0 && data.site_code.size() <= 100 &&
+             (data.latitude is number || data.latitude is float || data.latitude is int) && data.latitude >= -90.0 && data.latitude <= 90.0 &&
+             (data.longitude is number || data.longitude is float || data.longitude is int) && data.longitude >= -180.0 && data.longitude <= 180.0 &&
+             data.timestamp is string && data.timestamp.size() > 0 && data.timestamp.size() <= 100 &&
+             (!('technician' in data) || (data.technician is string && data.technician.size() <= 200)) &&
+             (!('created_at' in data) || data.created_at is timestamp);
+    }
+
+    match /towergpslocation/{siteCode} {
+      // Owner / Admin can read and delete all records
+      allow read, delete: if request.auth != null;
+
+      // ANY technician from any device can create or update site coordinates directly in the central database
+      allow create, update: if isValidId(siteCode) &&
+                               incoming().site_code == siteCode &&
+                               incoming().keys().hasAll(['site_code', 'latitude', 'longitude', 'timestamp']) &&
+                               isValidTowerLocation(incoming());
+    }
+  }
+}

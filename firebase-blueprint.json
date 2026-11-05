@@ -1,0 +1,49 @@
+{
+  "entities": {
+    "TowerLocation": {
+      "title": "Tower Location",
+      "description": "Telecom tower location record keyed by site code with GPS coordinates and timestamps",
+      "type": "object",
+      "properties": {
+        "site_code": {
+          "type": "string",
+          "description": "Unique telecom tower site code identifier (e.g. FNDGN27)"
+        },
+        "latitude": {
+          "type": "number",
+          "description": "WGS84 GPS Latitude coordinate"
+        },
+        "longitude": {
+          "type": "number",
+          "description": "WGS84 GPS Longitude coordinate"
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "Technician capture timestamp string"
+        },
+        "technician": {
+          "type": "string",
+          "description": "Device installation identifier or technician email if signed in"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of record creation. Clients submit FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "site_code",
+        "latitude",
+        "longitude",
+        "timestamp",
+        "created_at"
+      ]
+    }
+  },
+  "firestore": {
+    "/towergpslocation/{siteCode}": {
+      "schema": "TowerLocation",
+      "description": "Telecom tower locations recorded for each site code into central database"
+    }
+  }
+}
