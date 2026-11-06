@@ -14,24 +14,71 @@ service cloud.firestore {
       return request.resource.data;
     }
 
-    function isValidTowerLocation(data) {
+    function isValidSlot1(d) {
+      return (!('latitude_1' in d) || (d.latitude_1 is number && d.latitude_1 >= -90.0 && d.latitude_1 <= 90.0)) &&
+             (!('longitude_1' in d) || (d.longitude_1 is number && d.longitude_1 >= -180.0 && d.longitude_1 <= 180.0)) &&
+             (!('technician_1' in d) || (d.technician_1 is string && d.technician_1.size() <= 200)) &&
+             (!('timestamp_1' in d) || (d.timestamp_1 is string && d.timestamp_1.size() <= 100));
+    }
+
+    function isValidSlot2(d) {
+      return (!('latitude_2' in d) || (d.latitude_2 is number && d.latitude_2 >= -90.0 && d.latitude_2 <= 90.0)) &&
+             (!('longitude_2' in d) || (d.longitude_2 is number && d.longitude_2 >= -180.0 && d.longitude_2 <= 180.0)) &&
+             (!('technician_2' in d) || (d.technician_2 is string && d.technician_2.size() <= 200)) &&
+             (!('timestamp_2' in d) || (d.timestamp_2 is string && d.timestamp_2.size() <= 100));
+    }
+
+    function isValidSlot3(d) {
+      return (!('latitude_3' in d) || (d.latitude_3 is number && d.latitude_3 >= -90.0 && d.latitude_3 <= 90.0)) &&
+             (!('longitude_3' in d) || (d.longitude_3 is number && d.longitude_3 >= -180.0 && d.longitude_3 <= 180.0)) &&
+             (!('technician_3' in d) || (d.technician_3 is string && d.technician_3.size() <= 200)) &&
+             (!('timestamp_3' in d) || (d.timestamp_3 is string && d.timestamp_3.size() <= 100));
+    }
+
+    function isValidSlot4(d) {
+      return (!('latitude_4' in d) || (d.latitude_4 is number && d.latitude_4 >= -90.0 && d.latitude_4 <= 90.0)) &&
+             (!('longitude_4' in d) || (d.longitude_4 is number && d.longitude_4 >= -180.0 && d.longitude_4 <= 180.0)) &&
+             (!('technician_4' in d) || (d.technician_4 is string && d.technician_4.size() <= 200)) &&
+             (!('timestamp_4' in d) || (d.timestamp_4 is string && d.timestamp_4.size() <= 100));
+    }
+
+    function isValidSlot5(d) {
+      return (!('latitude_5' in d) || (d.latitude_5 is number && d.latitude_5 >= -90.0 && d.latitude_5 <= 90.0)) &&
+             (!('longitude_5' in d) || (d.longitude_5 is number && d.longitude_5 >= -180.0 && d.longitude_5 <= 180.0)) &&
+             (!('technician_5' in d) || (d.technician_5 is string && d.technician_5.size() <= 200)) &&
+             (!('timestamp_5' in d) || (d.timestamp_5 is string && d.timestamp_5.size() <= 100));
+    }
+
+    function isValidLegacy(d) {
+      return (!('latitude' in d) || (d.latitude is number && d.latitude >= -90.0 && d.latitude <= 90.0)) &&
+             (!('longitude' in d) || (d.longitude is number && d.longitude >= -180.0 && d.longitude <= 180.0)) &&
+             (!('technician' in d) || (d.technician is string && d.technician.size() <= 200)) &&
+             (!('timestamp' in d) || (d.timestamp is string && d.timestamp.size() <= 100));
+    }
+
+    function isValidTowerDoc(data) {
       return data.site_code is string && data.site_code.size() > 0 && data.site_code.size() <= 100 &&
-             (data.latitude is number || data.latitude is float || data.latitude is int) && data.latitude >= -90.0 && data.latitude <= 90.0 &&
-             (data.longitude is number || data.longitude is float || data.longitude is int) && data.longitude >= -180.0 && data.longitude <= 180.0 &&
-             data.timestamp is string && data.timestamp.size() > 0 && data.timestamp.size() <= 100 &&
-             (!('technician' in data) || (data.technician is string && data.technician.size() <= 200)) &&
-             (!('created_at' in data) || data.created_at is timestamp);
+             (!('verification' in data) || (data.verification is string && data.verification in ['yes', 'no'])) &&
+             (!('created_at' in data) || data.created_at is timestamp) &&
+             isValidLegacy(data) &&
+             isValidSlot1(data) &&
+             isValidSlot2(data) &&
+             isValidSlot3(data) &&
+             isValidSlot4(data) &&
+             isValidSlot5(data);
     }
 
     match /towergpslocation/{siteCode} {
-      // Owner / Admin can read and delete all records
-      allow read, delete: if request.auth != null;
+      // Any technician or client can get a specific site document to check verification status and existing slots
+      allow get: if isValidId(siteCode);
+
+      // Authenticated admin/owner can list or delete
+      allow list, delete: if request.auth != null;
 
       // ANY technician from any device can create or update site coordinates directly in the central database
       allow create, update: if isValidId(siteCode) &&
                                incoming().site_code == siteCode &&
-                               incoming().keys().hasAll(['site_code', 'latitude', 'longitude', 'timestamp']) &&
-                               isValidTowerLocation(incoming());
+                               isValidTowerDoc(incoming());
     }
   }
 }

@@ -1419,7 +1419,7 @@ fun ProfileSideDrawer(
 
                 // Footer
                 Text(
-                    text = "TowerCam v1.0 • Azizur Rahman Central DB",
+                    text = "TowerCam v1.1 • Azizur Rahman Central DB",
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                     color = Color(0xFF475569),
                     textAlign = TextAlign.Center,

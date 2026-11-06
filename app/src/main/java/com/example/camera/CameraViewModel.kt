@@ -195,11 +195,23 @@ class CameraViewModel(
                         withContext(Dispatchers.Main) {
                             _lastSubmittedSiteCode.value = repository.getLastSubmittedSiteCode()
 
-                            firestoreResult.onSuccess { newlyLogged ->
-                                if (newlyLogged) {
-                                    showStatus("Saved! Site $currentSite recorded in database ✓")
-                                } else {
-                                    showStatus("Saved to Gallery ($currentSite already recorded)")
+                            firestoreResult.onSuccess { outcome ->
+                                when (outcome) {
+                                    is com.example.data.repository.LocationLogOutcome.CacheHit -> {
+                                        showStatus("লোকাল ক্যাশে সংরক্ষিত ($currentSite) ✓")
+                                    }
+                                    is com.example.data.repository.LocationLogOutcome.AlreadyVerified -> {
+                                        showStatus("সাইট $currentSite ভেরিফাইড (Yes) ✓")
+                                    }
+                                    is com.example.data.repository.LocationLogOutcome.NewSiteLogged -> {
+                                        showStatus("সাইট $currentSite ডাটাবেজে যুক্ত হয়েছে (স্লট ১) ✓")
+                                    }
+                                    is com.example.data.repository.LocationLogOutcome.SlotUpdated -> {
+                                        showStatus("সাইট $currentSite ডাটাবেজে আপডেট হয়েছে (স্লট ${outcome.slotNumber}) ✓")
+                                    }
+                                    is com.example.data.repository.LocationLogOutcome.SlotsFull -> {
+                                        showStatus("সাইট $currentSite এর ৫টি স্লটই পূর্ণ রয়েছে ✓")
+                                    }
                                 }
                             }.onFailure { err ->
                                 Log.w("TowerCamVM", "Firestore sync warning: ${err.message}")
@@ -239,11 +251,23 @@ class CameraViewModel(
             )
             withContext(Dispatchers.Main) {
                 _lastSubmittedSiteCode.value = repository.getLastSubmittedSiteCode()
-                firestoreResult.onSuccess { newlyLogged ->
-                    if (newlyLogged) {
-                        showStatus("Cloud connected: Site $currentSite logged to database!")
-                    } else {
-                        showStatus("Cloud connected: Site $currentSite already recorded")
+                firestoreResult.onSuccess { outcome ->
+                    when (outcome) {
+                        is com.example.data.repository.LocationLogOutcome.CacheHit -> {
+                            showStatus("লোকাল ক্যাশে বিদ্যমান ($currentSite)")
+                        }
+                        is com.example.data.repository.LocationLogOutcome.AlreadyVerified -> {
+                            showStatus("সাইট $currentSite ভেরিফাইড ✓")
+                        }
+                        is com.example.data.repository.LocationLogOutcome.NewSiteLogged -> {
+                            showStatus("ক্লাউড সিঙ্ক: সাইট $currentSite যুক্ত হয়েছে (স্লট ১)")
+                        }
+                        is com.example.data.repository.LocationLogOutcome.SlotUpdated -> {
+                            showStatus("ক্লাউড সিঙ্ক: সাইট $currentSite আপডেট হয়েছে (স্লট ${outcome.slotNumber})")
+                        }
+                        is com.example.data.repository.LocationLogOutcome.SlotsFull -> {
+                            showStatus("ক্লাউড সিঙ্ক: সাইট $currentSite এর ৫টি স্লটই পূর্ণ")
+                        }
                     }
                 }
             }
