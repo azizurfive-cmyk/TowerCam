@@ -40,7 +40,9 @@ class CameraViewModel(
     private val prefs = application.getSharedPreferences("tower_cam_prefs", Context.MODE_PRIVATE)
 
     private val _siteCode = MutableStateFlow(
-        prefs.getString(KEY_CURRENT_SITE_CODE, "FNDGN27") ?: "FNDGN27"
+        prefs.getString(KEY_CURRENT_SITE_CODE, null)?.let { saved ->
+            if (saved == "FNDGN27" || saved.isBlank()) "DHBDD01" else saved
+        } ?: "DHBDD01"
     )
     val siteCode: StateFlow<String> = _siteCode.asStateFlow()
 
@@ -55,6 +57,9 @@ class CameraViewModel(
     private val _lastCapturedUri = MutableStateFlow<Uri?>(null)
     val lastCapturedUri: StateFlow<Uri?> = _lastCapturedUri.asStateFlow()
 
+    private val _capturedPhotos = MutableStateFlow<List<Uri>>(emptyList())
+    val capturedPhotos: StateFlow<List<Uri>> = _capturedPhotos.asStateFlow()
+
     private val _isTorchOn = MutableStateFlow(false)
     val isTorchOn: StateFlow<Boolean> = _isTorchOn.asStateFlow()
 
@@ -68,11 +73,32 @@ class CameraViewModel(
     val liveTimestamp: StateFlow<String> = _liveTimestamp.asStateFlow()
 
     init {
+        // Load initial photos saved in Pictures/TowerCam
+        loadGalleryPhotos()
+
         // Clock ticker for live HUD timestamp
         viewModelScope.launch {
             while (isActive) {
                 _liveTimestamp.value = getFormattedTimestamp()
                 delay(1000L)
+            }
+        }
+    }
+
+    fun getAnonymousTechnicianId(): String {
+        return repository.getAnonymousTechnicianId()
+    }
+
+    fun loadGalleryPhotos() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val list = WatermarkHelper.loadSavedPhotos(getApplication())
+            withContext(Dispatchers.Main) {
+                val current = _capturedPhotos.value
+                val merged = (current + list).distinct()
+                _capturedPhotos.value = merged
+                if (merged.isNotEmpty() && _lastCapturedUri.value == null) {
+                    _lastCapturedUri.value = merged.first()
+                }
             }
         }
     }
@@ -152,6 +178,7 @@ class CameraViewModel(
 
                 saveResult.onSuccess { uri ->
                     _lastCapturedUri.value = uri
+                    _capturedPhotos.value = listOf(uri) + _capturedPhotos.value.filter { it != uri }
                     Log.d("TowerCamVM", "Photo saved locally: $uri")
 
                     // 4. Smart Firebase Firestore Integration:

@@ -28,14 +28,18 @@ class TowerLocationRepository(
     private val auth = Firebase.auth
     private val collectionName = "towergpslocation"
 
-    private fun getTechnicianIdentifier(): String {
+    fun getAnonymousTechnicianId(): String {
+        val existing = sharedPrefs?.getString(KEY_DEVICE_UUID, null)
+        if (existing != null) return "Technician_$existing"
+        val newId = java.util.UUID.randomUUID().toString().take(6).uppercase()
+        sharedPrefs?.edit()?.putString(KEY_DEVICE_UUID, newId)?.apply()
+        return "Technician_$newId"
+    }
+
+    fun getTechnicianIdentifier(): String {
         return auth.currentUser?.email
             ?: auth.currentUser?.displayName
-            ?: ("Technician_" + (sharedPrefs?.getString(KEY_DEVICE_UUID, null) ?: run {
-                val newId = java.util.UUID.randomUUID().toString().take(6).uppercase()
-                sharedPrefs?.edit()?.putString(KEY_DEVICE_UUID, newId)?.apply()
-                newId
-            }))
+            ?: getAnonymousTechnicianId()
     }
 
     fun getLastSubmittedSiteCode(): String? {

@@ -1,5 +1,6 @@
 package com.example.camera
 
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
@@ -84,8 +85,7 @@ object WatermarkHelper {
         val line1Site = "SITE: ${siteCode.trim().uppercase()}"
         val line2Gps = "LAT: ${String.format(Locale.US, "%.6f°", location.latitude)}  LON: ${String.format(Locale.US, "%.6f°", location.longitude)}"
         val line3Time = "TIME: $timestampString"
-        val line4Details = "ACC: ${location.formattedAccuracy}  |  ALT: ${location.formattedAltitude}"
-        val line5Brand = "TOWERCAM • TELECOM FIELD TELEMETRY"
+        val line4Brand = "TowerCam, Tower Location"
 
         // Paints
         val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -102,13 +102,6 @@ object WatermarkHelper {
             setShadowLayer(4f * scale, 1f, 1f, Color.BLACK)
         }
 
-        val metaPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(203, 213, 225) // Slate 300
-            textSize = metaTextSize
-            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL)
-            setShadowLayer(3f * scale, 1f, 1f, Color.BLACK)
-        }
-
         val brandPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(245, 158, 11) // Warm Amber
             textSize = metaTextSize
@@ -121,12 +114,11 @@ object WatermarkHelper {
             sitePaint.measureText(line1Site),
             textPaint.measureText(line2Gps),
             textPaint.measureText(line3Time),
-            textPaint.measureText(line4Details),
-            brandPaint.measureText(line5Brand)
+            brandPaint.measureText(line4Brand)
         ).maxOrNull() ?: (300f * scale)
 
         val cardWidth = maxTextWidth + (padding * 2) + (10f * scale)
-        val totalTextHeight = titleTextSize + (bodyTextSize * 3) + metaTextSize + (lineSpacing * 5)
+        val totalTextHeight = titleTextSize + (bodyTextSize * 2) + metaTextSize + (lineSpacing * 4)
         val cardHeight = totalTextHeight + (padding * 2)
 
         val left = cardMargin
@@ -174,12 +166,8 @@ object WatermarkHelper {
         canvas.drawText(line3Time, textLeft, currentY, textPaint)
         currentY += bodyTextSize + lineSpacing
 
-        // Line 4: Altitude & Accuracy
-        canvas.drawText(line4Details, textLeft, currentY, metaPaint)
-        currentY += metaTextSize + lineSpacing
-
-        // Line 5: Brand / Inspection Tag
-        canvas.drawText(line5Brand, textLeft, currentY, brandPaint)
+        // Line 4: Brand / Telemetry Tag
+        canvas.drawText(line4Brand, textLeft, currentY, brandPaint)
 
         return watermarkedBitmap
     }
@@ -234,5 +222,51 @@ object WatermarkHelper {
             Log.e("TowerCamSave", "Error saving image to gallery", e)
             Result.failure(e)
         }
+    }
+
+    /**
+     * Loads all photos taken with TowerCam from MediaStore (Pictures/TowerCam folder),
+     * sorted newest first (most recently captured at index 0).
+     */
+    fun loadSavedPhotos(context: Context): List<Uri> {
+        val photoUris = mutableListOf<Uri>()
+        val projection = arrayOf(
+            MediaStore.Images.Media._ID,
+            MediaStore.Images.Media.DATE_ADDED
+        )
+        val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
+
+        try {
+            val selection: String
+            val selectionArgs: Array<String>
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                selection = "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ? OR ${MediaStore.Images.Media.DISPLAY_NAME} LIKE ?"
+                selectionArgs = arrayOf("%Pictures/TowerCam%", "TowerCam_%")
+            } else {
+                selection = "${MediaStore.Images.Media.DATA} LIKE ? OR ${MediaStore.Images.Media.DISPLAY_NAME} LIKE ?"
+                selectionArgs = arrayOf("%TowerCam%", "TowerCam_%")
+            }
+
+            context.contentResolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                selectionArgs,
+                sortOrder
+            )?.use { cursor ->
+                val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(idColumn)
+                    val contentUri = ContentUris.withAppendedId(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                        id
+                    )
+                    photoUris.add(contentUri)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("TowerCamGallery", "Error querying saved photos from MediaStore", e)
+        }
+        return photoUris
     }
 }

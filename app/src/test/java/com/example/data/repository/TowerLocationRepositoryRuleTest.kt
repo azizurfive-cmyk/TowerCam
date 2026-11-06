@@ -63,7 +63,7 @@ class TowerLocationRepositoryRuleTest : FirestoreEmulatorTestBase() {
         val prefs = context.getSharedPreferences("test_prefs_unauth_read", Context.MODE_PRIVATE)
         val repository = TowerLocationRepository(firestore, prefs)
 
-        val siteCode = "FNDGN27"
+        val siteCode = "DHBDD01"
         try {
             withTimeout(DEFAULT_TIMEOUT_MS) {
                 val res = repository.getTowerLocation(siteCode)
