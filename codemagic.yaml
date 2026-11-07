@@ -1,0 +1,57 @@
+
+workflows:
+  towercam-release:
+    name: TowerCam Release APK
+    max_build_duration: 60
+    instance_type: linux_x2
+
+    environment:
+      java: 17
+
+      android_signing:
+        - towercam_release_key
+
+      groups:
+        - firebase_config
+
+    scripts:
+      - name: Prepare Android and Firebase configuration
+        script: |
+          set -e
+
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/local.properties"
+
+          if [ -z "$GOOGLE_SERVICES_JSON" ]; then
+            echo "ERROR: GOOGLE_SERVICES_JSON is missing"
+            exit 1
+          fi
+
+          printf '%s' "$GOOGLE_SERVICES_JSON" > "$CM_BUILD_DIR/app/google-services.json"
+
+          echo "Firebase configuration prepared."
+
+      - name: Configure release signing
+        script: |
+          set -e
+
+          export KEYSTORE_PATH="$CM_KEYSTORE_PATH"
+          export STORE_PASSWORD="$CM_KEYSTORE_PASSWORD"
+          export KEY_PASSWORD="$CM_KEY_PASSWORD"
+
+          echo "Release signing environment prepared."
+
+      - name: Build TowerCam Release APK
+        script: |
+          set -e
+
+          if [ -f "$CM_BUILD_DIR/gradlew" ]; then
+            chmod +x "$CM_BUILD_DIR/gradlew"
+            "$CM_BUILD_DIR/gradlew" --no-daemon clean :app:assembleRelease
+          else
+            gradle --no-daemon clean :app:assembleRelease
+          fi
+
+          echo "TowerCam Release APK build completed."
+
+    artifacts:
+      - app/build/outputs/apk/release/*.apk
