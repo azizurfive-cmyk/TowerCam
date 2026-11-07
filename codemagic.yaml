@@ -30,26 +30,18 @@ workflows:
 
           echo "Firebase configuration prepared."
 
-      - name: Configure release signing
+      - name: Build TowerCam Release APK
         script: |
           set -e
 
           export KEYSTORE_PATH="$CM_KEYSTORE_PATH"
           export STORE_PASSWORD="$CM_KEYSTORE_PASSWORD"
           export KEY_PASSWORD="$CM_KEY_PASSWORD"
+          export KEY_ALIAS="$CM_KEY_ALIAS"
 
-          echo "Release signing environment prepared."
+          chmod +x "$CM_BUILD_DIR/gradlew"
 
-      - name: Build TowerCam Release APK
-        script: |
-          set -e
-
-          if [ -f "$CM_BUILD_DIR/gradlew" ]; then
-            chmod +x "$CM_BUILD_DIR/gradlew"
-            "$CM_BUILD_DIR/gradlew" --no-daemon clean :app:assembleRelease
-          else
-            gradle --no-daemon clean :app:assembleRelease
-          fi
+          "$CM_BUILD_DIR/gradlew" --no-daemon clean :app:assembleRelease
 
           echo "TowerCam Release APK build completed."
 
