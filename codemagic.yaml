@@ -34,14 +34,17 @@ workflows:
         script: |
           set -e
 
-          export KEYSTORE_PATH="$CM_KEYSTORE_PATH"
-          export STORE_PASSWORD="$CM_KEYSTORE_PASSWORD"
-          export KEY_PASSWORD="$CM_KEY_PASSWORD"
-          export KEY_ALIAS="$CM_KEY_ALIAS"
+          cd "$CM_BUILD_DIR"
 
-          chmod +x "$CM_BUILD_DIR/gradlew"
-
-          "$CM_BUILD_DIR/gradlew" --no-daemon clean :app:assembleRelease
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew --no-daemon clean :app:assembleRelease
+          elif command -v gradle >/dev/null 2>&1; then
+            gradle --no-daemon clean :app:assembleRelease
+          else
+            echo "ERROR: Gradle Wrapper and system Gradle are both missing."
+            exit 1
+          fi
 
           echo "TowerCam Release APK build completed."
 
