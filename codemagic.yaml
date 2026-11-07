@@ -30,11 +30,25 @@ workflows:
           echo "Firebase configuration prepared."
 
       
+
       - name: Build TowerCam Release APK
         script: |
           set -e
 
           cd "$CM_BUILD_DIR"
+
+          echo "Checking Codemagic Signing Key..."
+
+          if [ -z "$CM_KEYSTORE_PATH" ] || [ ! -f "$CM_KEYSTORE_PATH" ]; then
+            echo "ERROR: Codemagic Keystore is missing."
+            exit 1
+          fi
+
+          export KEYSTORE_PATH="$CM_KEYSTORE_PATH"
+          export STORE_PASSWORD="$CM_KEYSTORE_PASSWORD"
+          export KEY_PASSWORD="$CM_KEY_PASSWORD"
+
+          echo "Signing Key found successfully."
 
           echo "Downloading Gradle 9.3.1..."
 
@@ -44,15 +58,13 @@ workflows:
 
           GRADLE=/tmp/gradle-9.3.1/bin/gradle
 
-          echo "Checking Gradle version..."
           "$GRADLE" --version
 
-          echo "Building TowerCam..."
+          echo "Building Signed Release APK..."
 
           "$GRADLE" \
             --no-daemon \
             --no-configuration-cache \
-            --stacktrace \
             clean :app:assembleRelease
 
           echo "TowerCam Release APK build completed."
