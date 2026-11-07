@@ -254,10 +254,10 @@ object WatermarkHelper {
             val selection: String
             val selectionArgs: Array<String>
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                selection = "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ? OR ${MediaStore.Images.Media.DISPLAY_NAME} LIKE ?"
-                selectionArgs = arrayOf("%Pictures/TowerCam%", "TowerCam_%")
+                selection = "(${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?) OR (${MediaStore.Images.Media.DISPLAY_NAME} LIKE ?)"
+                selectionArgs = arrayOf("%TowerCam%", "TowerCam_%")
             } else {
-                selection = "${MediaStore.Images.Media.DATA} LIKE ? OR ${MediaStore.Images.Media.DISPLAY_NAME} LIKE ?"
+                selection = "(${MediaStore.Images.Media.DATA} LIKE ?) OR (${MediaStore.Images.Media.DISPLAY_NAME} LIKE ?)"
                 selectionArgs = arrayOf("%TowerCam%", "TowerCam_%")
             }
 

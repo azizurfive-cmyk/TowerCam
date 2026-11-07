@@ -47,8 +47,14 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -80,6 +86,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.CameraAlt
@@ -1659,7 +1666,9 @@ fun FullScreenGalleryViewer(
         pageCount = { photos.size }
     )
 
+    val scope = rememberCoroutineScope()
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var isCurrentPhotoZoomed by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -1668,41 +1677,80 @@ fun FullScreenGalleryViewer(
             .testTag("full_screen_gallery_viewer")
     ) {
         // Horizontal Pager: Page 0 is latest photo.
+        // Pager scrolling is allowed when photo is at normal scale (scale <= 1.05f).
         HorizontalPager(
             state = pagerState,
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize(),
+            userScrollEnabled = !isCurrentPhotoZoomed
         ) { page ->
-            var scale by remember { mutableFloatStateOf(1.0f) }
-            var offsetX by remember { mutableFloatStateOf(0f) }
-            var offsetY by remember { mutableFloatStateOf(0f) }
+            var scale by remember(page) { mutableFloatStateOf(1.0f) }
+            var offsetX by remember(page) { mutableFloatStateOf(0f) }
+            var offsetY by remember(page) { mutableFloatStateOf(0f) }
+
+            // Sync zoomed state to pager
+            LaunchedEffect(scale, pagerState.currentPage) {
+                if (pagerState.currentPage == page) {
+                    isCurrentPhotoZoomed = (scale > 1.05f)
+                }
+            }
+
+            // When page changes, reset zoom
+            LaunchedEffect(pagerState.currentPage) {
+                if (pagerState.currentPage != page && scale > 1.05f) {
+                    scale = 1.0f
+                    offsetX = 0f
+                    offsetY = 0f
+                }
+            }
 
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .pointerInput(page) {
-                        detectTransformGestures { _, pan, zoom, _ ->
-                            scale = (scale * zoom).coerceIn(1.0f, 4.0f)
-                            if (scale > 1.0f) {
-                                offsetX += pan.x
-                                offsetY += pan.y
-                            } else {
-                                offsetX = 0f
-                                offsetY = 0f
-                            }
-                        }
-                    }
-                    .pointerInput(page) {
                         detectTapGestures(
                             onDoubleTap = {
-                                if (scale > 1.0f) {
+                                if (scale > 1.05f) {
                                     scale = 1.0f
                                     offsetX = 0f
                                     offsetY = 0f
                                 } else {
-                                    scale = 2.0f
+                                    scale = 2.5f
                                 }
                             }
                         )
+                    }
+                    .pointerInput(page, scale) {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            do {
+                                val event = awaitPointerEvent()
+                                val pointerCount = event.changes.size
+
+                                if (pointerCount >= 2) {
+                                    // Pinch-to-zoom with 2 fingers
+                                    val zoom = event.calculateZoom()
+                                    val pan = event.calculatePan()
+                                    val newScale = (scale * zoom).coerceIn(1.0f, 4.0f)
+                                    scale = newScale
+                                    if (newScale > 1.05f) {
+                                        offsetX += pan.x
+                                        offsetY += pan.y
+                                    } else {
+                                        offsetX = 0f
+                                        offsetY = 0f
+                                    }
+                                    event.changes.forEach { it.consume() }
+                                } else if (pointerCount == 1 && scale > 1.05f) {
+                                    // Single-finger pan only when zoomed in
+                                    val pan = event.calculatePan()
+                                    offsetX += pan.x
+                                    offsetY += pan.y
+                                    event.changes.forEach { it.consume() }
+                                }
+                                // When single finger and scale <= 1.05f:
+                                // Changes are NOT consumed, allowing HorizontalPager to receive swipe gestures!
+                            } while (event.changes.any { it.pressed })
+                        }
                     },
                 contentAlignment = Alignment.Center
             ) {
@@ -1718,6 +1766,52 @@ fun FullScreenGalleryViewer(
                             translationX = offsetX
                             translationY = offsetY
                         }
+                )
+            }
+        }
+
+        // Left Navigation Arrow (Newer photo)
+        if (photos.size > 1 && pagerState.currentPage > 0) {
+            IconButton(
+                onClick = {
+                    scope.launch {
+                        pagerState.animateScrollToPage(pagerState.currentPage - 1)
+                    }
+                },
+                colors = IconButtonDefaults.iconButtonColors(containerColor = Color(0x990F172A)),
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(start = 12.dp)
+                    .size(46.dp)
+                    .testTag("gallery_prev_arrow")
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Previous Photo",
+                    tint = Color.White
+                )
+            }
+        }
+
+        // Right Navigation Arrow (Older photo)
+        if (photos.size > 1 && pagerState.currentPage < photos.size - 1) {
+            IconButton(
+                onClick = {
+                    scope.launch {
+                        pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                    }
+                },
+                colors = IconButtonDefaults.iconButtonColors(containerColor = Color(0x990F172A)),
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 12.dp)
+                    .size(46.dp)
+                    .testTag("gallery_next_arrow")
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                    contentDescription = "Next Photo",
+                    tint = Color.White
                 )
             }
         }
@@ -1758,7 +1852,7 @@ fun FullScreenGalleryViewer(
                         color = Color.White
                     )
                     Text(
-                        text = if (pagerState.currentPage == 0) "সবচেয়ে সাম্প্রতিক ফটো (Latest)" else "পূর্ববর্তী ফটো (Past photo)",
+                        text = if (pagerState.currentPage == 0) "সবচেয়ে সাম্প্রতিক ফটো (Latest)" else "পূর্ববর্তী ফটো #${pagerState.currentPage + 1}",
                         style = MaterialTheme.typography.labelSmall,
                         color = if (pagerState.currentPage == 0) TowerCyanBright else Color(0xFF94A3B8)
                     )
@@ -1804,35 +1898,60 @@ fun FullScreenGalleryViewer(
             }
         }
 
-        // Bottom Navigation Hints
+        // Bottom Navigation Bar with Thumbnails & Hint
         val navBarPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-        Box(
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .background(
                     Brush.verticalGradient(
-                        colors = listOf(Color.Transparent, Color(0xE6000000))
+                        colors = listOf(Color.Transparent, Color(0xCC000000), Color(0xF2000000))
                     )
                 )
-                .padding(bottom = navBarPadding + 16.dp, start = 16.dp, end = 16.dp, top = 20.dp),
-            contentAlignment = Alignment.Center
+                .padding(bottom = navBarPadding + 12.dp, start = 12.dp, end = 12.dp, top = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = "দুইবার ট্যাপ বা পিঞ্চ করে জুম (১x-৪x) করুন",
-                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                    color = Color(0xFF94A3B8)
-                )
-                if (photos.size > 1) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "← বামে সোয়াইপ করে পুরাতন ফটো দেখুন →",
-                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                        color = TowerCyanBright
-                    )
+            // Horizontal Thumbnail Strip (Click to jump to photo)
+            if (photos.size > 1) {
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(bottom = 10.dp)
+                ) {
+                    itemsIndexed(photos) { index, uri ->
+                        val isSelected = (index == pagerState.currentPage)
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .border(
+                                    width = if (isSelected) 2.5.dp else 1.dp,
+                                    color = if (isSelected) TowerCyanBright else Color(0x44FFFFFF),
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                                .clickable {
+                                    scope.launch {
+                                        pagerState.animateScrollToPage(index)
+                                    }
+                                }
+                        ) {
+                            AsyncImage(
+                                model = uri,
+                                contentDescription = "Photo $index",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    }
                 }
             }
+
+            Text(
+                text = "← বামে সোয়াইপ বা তীরে ট্যাপ করে পুরাতন ফটো দেখুন • ডাবল ট্যাপে জুম →",
+                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                color = TowerCyanBright,
+                textAlign = TextAlign.Center
+            )
         }
     }
 
