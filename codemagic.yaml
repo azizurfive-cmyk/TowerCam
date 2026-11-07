@@ -36,20 +36,18 @@ workflows:
 
           cd "$CM_BUILD_DIR"
 
-          echo "Downloading Gradle 8.5..."
+          echo "Downloading Gradle 9.3.1..."
 
-          curl -fL https://services.gradle.org/distributions/gradle-8.5-bin.zip -o /tmp/gradle.zip
+          curl -fL https://services.gradle.org/distributions/gradle-9.3.1-bin.zip -o /tmp/gradle.zip
 
           unzip -q /tmp/gradle.zip -d /tmp
 
-          GRADLE=/tmp/gradle-8.5/bin/gradle
-
-          chmod +x "$GRADLE"
+          GRADLE=/tmp/gradle-9.3.1/bin/gradle
 
           echo "Checking Gradle version..."
           "$GRADLE" --version
 
-          echo "Starting TowerCam Release Build..."
+          echo "Building TowerCam..."
 
           "$GRADLE" \
             --no-daemon \
@@ -57,7 +55,6 @@ workflows:
             --stacktrace \
             clean :app:assembleRelease
 
-          echo "TowerCam APK build completed."
-
+          echo "TowerCam Release APK build completed."
     artifacts:
       - app/build/outputs/apk/release/*.apk
