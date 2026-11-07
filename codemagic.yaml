@@ -1,4 +1,4 @@
-
+```yaml
 workflows:
   towercam-release:
     name: TowerCam Release APK
@@ -30,7 +30,7 @@ workflows:
 
           echo "Firebase configuration prepared."
 
-            - name: Build TowerCam Release APK
+      - name: Build TowerCam Release APK
         script: |
           set -e
 
@@ -55,12 +55,13 @@ workflows:
               --no-configuration-cache \
               --stacktrace \
               clean :app:assembleRelease
-
           else
             gradle --no-daemon \
               --no-configuration-cache \
               --stacktrace \
               clean :app:assembleRelease
           fi
+
     artifacts:
       - app/build/outputs/apk/release/*.apk
+```
