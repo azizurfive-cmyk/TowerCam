@@ -12,6 +12,9 @@ import com.example.location.GpsLocationData
 import com.example.location.LocationHelper
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
+import com.example.version.VersionManager
+import com.example.version.VersionState
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,6 +41,33 @@ class CameraViewModel(
     val gpsLocation: StateFlow<GpsLocationData> = locationHelper.locationData
 
     private val prefs = application.getSharedPreferences("tower_cam_prefs", Context.MODE_PRIVATE)
+
+    val versionManager = VersionManager(application)
+    val versionState: StateFlow<VersionState> = versionManager.versionState
+
+    private val _isShutterSoundEnabled = MutableStateFlow(
+        prefs.getBoolean(KEY_SHUTTER_SOUND_ENABLED, true)
+    )
+    val isShutterSoundEnabled: StateFlow<Boolean> = _isShutterSoundEnabled.asStateFlow()
+
+    private val _captureMode = MutableStateFlow("PHOTO") // "PHOTO" or "VIDEO"
+    val captureMode: StateFlow<String> = _captureMode.asStateFlow()
+
+    private val _isRecordingVideo = MutableStateFlow(false)
+    val isRecordingVideo: StateFlow<Boolean> = _isRecordingVideo.asStateFlow()
+
+    private val _recordingDurationSeconds = MutableStateFlow(0)
+    val recordingDurationSeconds: StateFlow<Int> = _recordingDurationSeconds.asStateFlow()
+    private var videoTimerJob: Job? = null
+
+    private val _zoomLevel = MutableStateFlow(1.0f)
+    val zoomLevel: StateFlow<Float> = _zoomLevel.asStateFlow()
+
+    private val _focusTarget = MutableStateFlow<Pair<Float, Float>?>(null)
+    val focusTarget: StateFlow<Pair<Float, Float>?> = _focusTarget.asStateFlow()
+
+    private val _cachedSiteCount = MutableStateFlow(0)
+    val cachedSiteCount: StateFlow<Int> = _cachedSiteCount.asStateFlow()
 
     private val _siteCode = MutableStateFlow(
         prefs.getString(KEY_CURRENT_SITE_CODE, null)?.let { saved ->
@@ -75,6 +105,12 @@ class CameraViewModel(
     init {
         // Load initial photos saved in Pictures/TowerCam
         loadGalleryPhotos()
+        refreshCacheCount()
+
+        // Check version authorization using Firestore Random Interval strategy
+        viewModelScope.launch {
+            versionManager.checkVersion(forceCheck = false)
+        }
 
         // Clock ticker for live HUD timestamp
         viewModelScope.launch {
@@ -136,6 +172,106 @@ class CameraViewModel(
 
     fun clearStatusMessage() {
         _statusMessage.value = null
+    }
+
+    fun setShutterSoundEnabled(enabled: Boolean) {
+        _isShutterSoundEnabled.value = enabled
+        prefs.edit().putBoolean(KEY_SHUTTER_SOUND_ENABLED, enabled).apply()
+    }
+
+    fun setCaptureMode(mode: String) {
+        _captureMode.value = mode
+    }
+
+    fun setZoomLevel(zoom: Float) {
+        _zoomLevel.value = zoom.coerceIn(1.0f, 8.0f)
+    }
+
+    fun triggerFocus(x: Float, y: Float) {
+        _focusTarget.value = Pair(x, y)
+        viewModelScope.launch {
+            delay(1500L)
+            if (_focusTarget.value == Pair(x, y)) {
+                _focusTarget.value = null
+            }
+        }
+    }
+
+    fun startVideoRecordingTimer() {
+        _isRecordingVideo.value = true
+        _recordingDurationSeconds.value = 0
+        videoTimerJob?.cancel()
+        videoTimerJob = viewModelScope.launch {
+            while (isActive) {
+                delay(1000L)
+                _recordingDurationSeconds.value += 1
+                if (_recordingDurationSeconds.value >= 120) {
+                    showStatus("ভিডিও রেকর্ডিংয়ের সর্বোচ্চ সীমা (২ মিনিট) পূর্ণ হয়েছে")
+                    break
+                }
+            }
+        }
+    }
+
+    fun stopVideoRecordingTimer() {
+        _isRecordingVideo.value = false
+        videoTimerJob?.cancel()
+        videoTimerJob = null
+    }
+
+    fun deletePhoto(uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val success = WatermarkHelper.deletePhoto(getApplication(), uri)
+            withContext(Dispatchers.Main) {
+                if (success) {
+                    _capturedPhotos.value = _capturedPhotos.value.filter { it != uri }
+                    if (_lastCapturedUri.value == uri) {
+                        _lastCapturedUri.value = _capturedPhotos.value.firstOrNull()
+                    }
+                    showStatus("ফটো সফলভাবে ডিলিট করা হয়েছে")
+                } else {
+                    showStatus("ফটো ডিলিট করা যায়নি")
+                }
+            }
+        }
+    }
+
+    fun refreshCacheCount() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val count = repository.getLocalCacheCount()
+            withContext(Dispatchers.Main) {
+                _cachedSiteCount.value = count
+            }
+        }
+    }
+
+    fun clearLocalCache() {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.clearLocalCache()
+            withContext(Dispatchers.Main) {
+                _cachedSiteCount.value = 0
+                showStatus("লোকাল সাইট ক্যাশ সম্পূর্ণ পরিষ্কার করা হয়েছে ✓")
+            }
+        }
+    }
+
+    fun checkForUpdates(forceCheck: Boolean = true) {
+        viewModelScope.launch {
+            showStatus("নতুন ভার্সন চেক করা হচ্ছে...")
+            val result = versionManager.checkVersion(forceCheck = forceCheck)
+            when (result) {
+                is VersionState.Allowed -> {
+                    showStatus("TowerCam ভার্সন v1.2 সক্রিয় এবং অনুমোদিত ✓")
+                }
+                is VersionState.Blocked -> {
+                    showStatus("সতর্কতা: এই ভার্সনটি বন্ধ করা হয়েছে! আপডেট করুন")
+                }
+                is VersionState.Error -> {
+                    showStatus("ভার্সন চেক ব্যর্থ: ${result.message}")
+                }
+                else -> {}
+            }
+        }
     }
 
     private fun showStatus(msg: String) {
@@ -280,5 +416,6 @@ class CameraViewModel(
 
     companion object {
         private const val KEY_CURRENT_SITE_CODE = "key_current_site_code"
+        private const val KEY_SHUTTER_SOUND_ENABLED = "key_shutter_sound_enabled"
     }
 }

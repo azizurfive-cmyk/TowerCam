@@ -204,7 +204,7 @@ object WatermarkHelper {
             }
 
             outputStream.use { stream ->
-                val compressed = bitmap.compress(Bitmap.CompressFormat.JPEG, 95, stream)
+                val compressed = bitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream)
                 if (!compressed) {
                     return@withContext Result.failure(Exception("Failed to compress bitmap as JPEG"))
                 }
@@ -221,6 +221,20 @@ object WatermarkHelper {
         } catch (e: Exception) {
             Log.e("TowerCamSave", "Error saving image to gallery", e)
             Result.failure(e)
+        }
+    }
+
+    /**
+     * Deletes a photo from the device MediaStore.
+     */
+    fun deletePhoto(context: Context, uri: Uri): Boolean {
+        return try {
+            val rows = context.contentResolver.delete(uri, null, null)
+            Log.d("TowerCamGallery", "Deleted photo $uri: rows=$rows")
+            rows > 0
+        } catch (e: Exception) {
+            Log.e("TowerCamGallery", "Failed to delete photo $uri", e)
+            false
         }
     }
 

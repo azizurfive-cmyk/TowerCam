@@ -1,19 +1,42 @@
 package com.example.camera
 
+import android.Manifest
+import android.content.ContentValues
 import android.content.Context
-import android.graphics.Bitmap
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.media.MediaActionSound
 import android.net.Uri
+import android.provider.MediaStore
 import android.util.Log
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.video.MediaStoreOutputOptions
+import androidx.camera.video.Quality
+import androidx.camera.video.QualitySelector
+import androidx.camera.video.Recorder
+import androidx.camera.video.Recording
+import androidx.camera.video.VideoCapture
+import androidx.camera.video.VideoRecordEvent
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -24,6 +47,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -39,8 +64,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
@@ -62,7 +87,10 @@ import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.GpsFixed
@@ -70,6 +98,13 @@ import androidx.compose.material.icons.filled.GpsNotFixed
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -77,6 +112,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -85,12 +121,15 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -101,14 +140,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -125,9 +168,13 @@ import com.example.ui.theme.TowerCyanBright
 import com.example.ui.theme.TowerDark
 import com.example.ui.theme.TowerGreen
 import com.example.ui.theme.TowerSlate
+import com.example.version.VersionState
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
+import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlin.math.roundToInt
 
 @Composable
 fun CameraScreen(
@@ -151,16 +198,41 @@ fun CameraScreen(
     val statusMessage by viewModel.statusMessage.collectAsStateWithLifecycle()
     val liveTimestamp by viewModel.liveTimestamp.collectAsStateWithLifecycle()
 
+    // Version 1.2 State
+    val isShutterSoundEnabled by viewModel.isShutterSoundEnabled.collectAsStateWithLifecycle()
+    val captureMode by viewModel.captureMode.collectAsStateWithLifecycle()
+    val isRecordingVideo by viewModel.isRecordingVideo.collectAsStateWithLifecycle()
+    val recordingDurationSeconds by viewModel.recordingDurationSeconds.collectAsStateWithLifecycle()
+    val zoomLevel by viewModel.zoomLevel.collectAsStateWithLifecycle()
+    val versionState by viewModel.versionState.collectAsStateWithLifecycle()
+    val cachedSiteCount by viewModel.cachedSiteCount.collectAsStateWithLifecycle()
+
     var showEditSiteDialog by remember { mutableStateOf(false) }
     var showFullScreenGallery by remember { mutableStateOf(false) }
     var showProfileDrawer by remember { mutableStateOf(false) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
     val anonymousId = remember { viewModel.getAnonymousTechnicianId() }
+
+    // Shutter Sound player
+    val soundPlayer = remember { MediaActionSound() }
+    DisposableEffect(Unit) {
+        onDispose {
+            soundPlayer.release()
+        }
+    }
+
+    // Tap-to-Focus Reticle State
+    var focusPosition by remember { mutableStateOf<Offset?>(null) }
+    var isFocusVisible by remember { mutableStateOf(false) }
+    val focusScale = remember { Animatable(1.4f) }
 
     // CameraX references
     val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
     var cameraProviderInstance by remember { mutableStateOf<ProcessCameraProvider?>(null) }
     var previewViewInstance by remember { mutableStateOf<PreviewView?>(null) }
     var imageCapture: ImageCapture? by remember { mutableStateOf(null) }
+    var videoCapture: VideoCapture<Recorder>? by remember { mutableStateOf(null) }
+    var activeRecording: Recording? by remember { mutableStateOf(null) }
     var cameraInstance: Camera? by remember { mutableStateOf(null) }
 
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
@@ -168,8 +240,21 @@ fun CameraScreen(
         viewModel.startTrackingLocation()
         onDispose {
             viewModel.stopTrackingLocation()
+            activeRecording?.stop()
             cameraExecutor.shutdown()
         }
+    }
+
+    // Audio record permission launcher for Video mode
+    var hasAudioPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasAudioPermission = granted
     }
 
     // Toggle Torch when state changes
@@ -181,20 +266,14 @@ fun CameraScreen(
         }
     }
 
-    // Bind / Rebind CameraX when front/back camera toggles or when provider/view is ready
-    LaunchedEffect(isFrontCamera, cameraProviderInstance, previewViewInstance) {
+    // Bind / Rebind CameraX when front/back camera, mode, or previewView changes
+    LaunchedEffect(isFrontCamera, captureMode, cameraProviderInstance, previewViewInstance) {
         val provider = cameraProviderInstance ?: return@LaunchedEffect
         val previewView = previewViewInstance ?: return@LaunchedEffect
 
         val preview = Preview.Builder().build().also {
             it.surfaceProvider = previewView.surfaceProvider
         }
-
-        val capture = ImageCapture.Builder()
-            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-            .build()
-
-        imageCapture = capture
 
         val cameraSelector = if (isFrontCamera) {
             CameraSelector.DEFAULT_FRONT_CAMERA
@@ -205,12 +284,42 @@ fun CameraScreen(
         try {
             if (provider.hasCamera(cameraSelector)) {
                 provider.unbindAll()
-                cameraInstance = provider.bindToLifecycle(
-                    lifecycleOwner,
-                    cameraSelector,
-                    preview,
-                    capture
-                )
+
+                if (captureMode == "PHOTO") {
+                    val capture = ImageCapture.Builder()
+                        .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                        .setJpegQuality(85)
+                        .build()
+                    imageCapture = capture
+                    videoCapture = null
+
+                    cameraInstance = provider.bindToLifecycle(
+                        lifecycleOwner,
+                        cameraSelector,
+                        preview,
+                        capture
+                    )
+                } else {
+                    // Video Mode
+                    val recorder = Recorder.Builder()
+                        .setQualitySelector(QualitySelector.from(Quality.HD))
+                        .build()
+                    val vidCap = VideoCapture.withOutput(recorder)
+                    videoCapture = vidCap
+                    imageCapture = null
+
+                    cameraInstance = provider.bindToLifecycle(
+                        lifecycleOwner,
+                        cameraSelector,
+                        preview,
+                        vidCap
+                    )
+                }
+
+                // Restore zoom level
+                cameraInstance?.cameraControl?.setZoomRatio(zoomLevel)
+
+                // Restore torch if on back camera
                 if (!isFrontCamera && isTorchOn && cameraInstance?.cameraInfo?.hasFlashUnit() == true) {
                     cameraInstance?.cameraControl?.enableTorch(true)
                 }
@@ -222,25 +331,79 @@ fun CameraScreen(
         }
     }
 
+    // Watch video recording duration limit (2 minutes = 120 seconds)
+    LaunchedEffect(recordingDurationSeconds) {
+        if (recordingDurationSeconds >= 120 && isRecordingVideo) {
+            activeRecording?.stop()
+            activeRecording = null
+            viewModel.stopVideoRecordingTimer()
+            if (isShutterSoundEnabled) {
+                soundPlayer.play(MediaActionSound.STOP_VIDEO_RECORDING)
+            }
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // 1. CameraX Preview View
-        AndroidView(
-            factory = { ctx ->
-                PreviewView(ctx).apply {
-                    scaleType = PreviewView.ScaleType.FILL_CENTER
-                }.also { view ->
-                    previewViewInstance = view
-                    cameraProviderFuture.addListener({
-                        cameraProviderInstance = cameraProviderFuture.get()
-                    }, ContextCompat.getMainExecutor(ctx))
+        // 1. CameraX Preview View + Gestures (Pinch to Zoom & Tap to Focus)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(cameraInstance) {
+                    detectTransformGestures { _, _, zoomChange, _ ->
+                        val currentRatio = cameraInstance?.cameraInfo?.zoomState?.value?.zoomRatio ?: 1f
+                        val maxRatio = cameraInstance?.cameraInfo?.zoomState?.value?.maxZoomRatio ?: 8f
+                        val minRatio = cameraInstance?.cameraInfo?.zoomState?.value?.minZoomRatio ?: 1f
+                        val targetZoom = (currentRatio * zoomChange).coerceIn(minRatio, minOf(8f, maxRatio))
+                        viewModel.setZoomLevel(targetZoom)
+                        cameraInstance?.cameraControl?.setZoomRatio(targetZoom)
+                    }
                 }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
+                .pointerInput(previewViewInstance, cameraInstance) {
+                    detectTapGestures { offset ->
+                        focusPosition = offset
+                        isFocusVisible = true
+                        scope.launch {
+                            focusScale.snapTo(1.4f)
+                            focusScale.animateTo(1.0f, tween(250, easing = FastOutSlowInEasing))
+                            kotlinx.coroutines.delay(1500)
+                            isFocusVisible = false
+                        }
+
+                        previewViewInstance?.let { pv ->
+                            try {
+                                val point = pv.meteringPointFactory.createPoint(offset.x, offset.y)
+                                val action = FocusMeteringAction.Builder(
+                                    point,
+                                    FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE
+                                )
+                                    .setAutoCancelDuration(3, TimeUnit.SECONDS)
+                                    .build()
+                                cameraInstance?.cameraControl?.startFocusAndMetering(action)
+                            } catch (e: Exception) {
+                                Log.w("TowerCamFocus", "FocusMetering failed: ${e.message}")
+                            }
+                        }
+                    }
+                }
+        ) {
+            AndroidView(
+                factory = { ctx ->
+                    PreviewView(ctx).apply {
+                        scaleType = PreviewView.ScaleType.FILL_CENTER
+                    }.also { view ->
+                        previewViewInstance = view
+                        cameraProviderFuture.addListener({
+                            cameraProviderInstance = cameraProviderFuture.get()
+                        }, ContextCompat.getMainExecutor(ctx))
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
 
         // 2. Viewfinder Reticle (Telecom Tower Crosshair HUD)
         Canvas(modifier = Modifier.fillMaxSize()) {
@@ -271,7 +434,77 @@ fun CameraScreen(
             drawLine(reticleColor, Offset(cx, cy + reticleRadius - 6.dp.toPx()), Offset(cx, cy + reticleRadius + reticleLine), strokeWidth)
         }
 
-        // 3. Top Control Bar (GPS Status, Flashlight, Camera Flip, Sign Out)
+        // 3. Dynamic Tap-to-Focus Box Indicator
+        if (isFocusVisible && focusPosition != null) {
+            val density = LocalDensity.current
+            val boxSizeDp = 64.dp
+            val boxSizePx = with(density) { boxSizeDp.toPx() }
+            val xOffset = (focusPosition!!.x - boxSizePx / 2f).roundToInt()
+            val yOffset = (focusPosition!!.y - boxSizePx / 2f).roundToInt()
+
+            Box(
+                modifier = Modifier
+                    .offset { IntOffset(xOffset, yOffset) }
+                    .size(boxSizeDp)
+                    .graphicsLayer {
+                        scaleX = focusScale.value
+                        scaleY = focusScale.value
+                    }
+                    .border(1.5.dp, TowerCyanBright, RoundedCornerShape(8.dp))
+            ) {
+                // Focus center indicator dot
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .background(TowerAmber, CircleShape)
+                        .align(Alignment.Center)
+                )
+            }
+        }
+
+        // 4. Quick Zoom Presets Pill (Floating on Viewfinder)
+        Surface(
+            color = Color(0x990F172A),
+            shape = RoundedCornerShape(20.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x3322D3EE)),
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 12.dp)
+                .testTag("zoom_presets_pill")
+        ) {
+            Column(
+                modifier = Modifier.padding(4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                listOf(1.0f, 2.0f, 3.0f).forEach { zoomTarget ->
+                    val isSelected = kotlin.math.abs(zoomLevel - zoomTarget) < 0.2f
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(if (isSelected) TowerCyanBright else Color.Transparent)
+                            .clickable {
+                                viewModel.setZoomLevel(zoomTarget)
+                                cameraInstance?.cameraControl?.setZoomRatio(zoomTarget)
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "${zoomTarget.toInt()}x",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp
+                            ),
+                            color = if (isSelected) Color.Black else Color.White
+                        )
+                    }
+                }
+            }
+        }
+
+        // 5. Top Control Bar (GPS Status, Flashlight, Camera Flip, Settings)
         val statusBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
         Row(
             modifier = Modifier
@@ -309,7 +542,7 @@ fun CameraScreen(
                 }
             }
 
-            // Action Buttons
+            // Action Buttons (Torch, Camera Switch, Settings)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -321,14 +554,14 @@ fun CameraScreen(
                         containerColor = if (isTorchOn) TowerAmber else Color(0xCC0F172A)
                     ),
                     modifier = Modifier
-                        .size(44.dp)
+                        .size(42.dp)
                         .testTag("torch_button")
                 ) {
                     Icon(
                         imageVector = if (isTorchOn) Icons.Default.FlashOn else Icons.Default.FlashOff,
                         contentDescription = "Toggle Torch",
                         tint = if (isTorchOn) Color.Black else Color.White,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 }
 
@@ -337,20 +570,39 @@ fun CameraScreen(
                     onClick = { viewModel.toggleCameraFacing() },
                     colors = IconButtonDefaults.iconButtonColors(containerColor = Color(0xCC0F172A)),
                     modifier = Modifier
-                        .size(44.dp)
+                        .size(42.dp)
                         .testTag("flip_camera_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Cameraswitch,
                         contentDescription = "Flip Camera",
                         tint = Color.White,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                // Settings & Options Dialog
+                IconButton(
+                    onClick = {
+                        viewModel.refreshCacheCount()
+                        showSettingsDialog = true
+                    },
+                    colors = IconButtonDefaults.iconButtonColors(containerColor = Color(0xCC0F172A)),
+                    modifier = Modifier
+                        .size(42.dp)
+                        .testTag("settings_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = "TowerCam Settings",
+                        tint = TowerCyanBright,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
         }
 
-        // 4. Status Message Toast / Banner
+        // 6. Status Message Toast / Banner
         AnimatedVisibility(
             visible = statusMessage != null,
             enter = fadeIn() + slideInVertically(initialOffsetY = { -it }),
@@ -385,12 +637,11 @@ fun CameraScreen(
             }
         }
 
-        // 5. Dynamic Watermark Overlay (Bottom-Left)
-        // Displays: Latitude & Longitude, Timestamp, Custom Text / Site Code + Edit Icon beside it
+        // 7. Dynamic Watermark Overlay (Bottom-Left)
         Box(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = 16.dp, bottom = 110.dp, end = 16.dp)
+                .padding(start = 16.dp, bottom = 148.dp, end = 16.dp)
         ) {
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color(0xDD0F172A)),
@@ -488,16 +739,123 @@ fun CameraScreen(
             }
         }
 
-        // 6. Bottom Shutter & Gallery Bar
-        Box(
+        // 8. Bottom Controls: Mode Selector & Shutter Bar
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .background(Color(0xCC000000))
-                .padding(horizontal = 24.dp, vertical = 18.dp)
         ) {
+            // Mode Selector Pill (PHOTO / VIDEO)
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    color = Color(0x800F172A),
+                    shape = RoundedCornerShape(20.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x4422D3EE))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Photo Mode Pill
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(if (captureMode == "PHOTO") TowerCyanBright else Color.Transparent)
+                                .clickable {
+                                    if (!isRecordingVideo) {
+                                        viewModel.setCaptureMode("PHOTO")
+                                    }
+                                }
+                                .padding(horizontal = 14.dp, vertical = 6.dp)
+                                .testTag("mode_photo_button")
+                        ) {
+                            Text(
+                                text = "ফটো (Photo)",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = if (captureMode == "PHOTO") Color.Black else Color.White
+                            )
+                        }
+
+                        // Video Mode Pill
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(if (captureMode == "VIDEO") Color(0xFFEF4444) else Color.Transparent)
+                                .clickable {
+                                    if (!isRecordingVideo) {
+                                        if (!hasAudioPermission) {
+                                            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                        }
+                                        viewModel.setCaptureMode("VIDEO")
+                                    }
+                                }
+                                .padding(horizontal = 14.dp, vertical = 6.dp)
+                                .testTag("mode_video_button")
+                        ) {
+                            Text(
+                                text = "ভিডিও (Video)",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Video Recording Timer HUD (Only visible in Video mode while recording)
+            if (captureMode == "VIDEO" && isRecordingVideo) {
+                val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+                val pulseAlpha by infiniteTransition.animateFloat(
+                    initialValue = 0.3f,
+                    targetValue = 1.0f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(600, easing = LinearEasing),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "pulseAlpha"
+                )
+
+                val minutes = recordingDurationSeconds / 60
+                val seconds = recordingDurationSeconds % 60
+                val timeFormatted = String.format("%02d:%02d", minutes, seconds)
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFEF4444).copy(alpha = pulseAlpha))
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "REC $timeFormatted / 02:00",
+                        style = MaterialTheme.typography.labelLarge.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = Color(0xFFEF4444)
+                    )
+                }
+            }
+
+            // Shutter Button Row
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 14.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -553,55 +911,155 @@ fun CameraScreen(
                     }
                 }
 
-                // Shutter Button
-                Box(
-                    modifier = Modifier
-                        .size(76.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.25f))
-                        .padding(5.dp)
-                        .clip(CircleShape)
-                        .background(Color.White)
-                        .clickable(enabled = !isCapturing && imageCapture != null) {
-                            val capture = imageCapture ?: return@clickable
-                            viewModel.clearStatusMessage()
+                // Shutter / Record Button
+                if (captureMode == "PHOTO") {
+                    // PHOTO SHUTTER
+                    Box(
+                        modifier = Modifier
+                            .size(76.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.25f))
+                            .padding(5.dp)
+                            .clip(CircleShape)
+                            .background(Color.White)
+                            .clickable(enabled = !isCapturing && imageCapture != null) {
+                                val capture = imageCapture ?: return@clickable
+                                viewModel.clearStatusMessage()
 
-                            capture.takePicture(
-                                cameraExecutor,
-                                object : ImageCapture.OnImageCapturedCallback() {
-                                    override fun onCaptureSuccess(image: ImageProxy) {
-                                        viewModel.processCapturedImage(image)
+                                if (isShutterSoundEnabled) {
+                                    soundPlayer.play(MediaActionSound.SHUTTER_CLICK)
+                                }
+
+                                capture.takePicture(
+                                    cameraExecutor,
+                                    object : ImageCapture.OnImageCapturedCallback() {
+                                        override fun onCaptureSuccess(image: ImageProxy) {
+                                            viewModel.processCapturedImage(image)
+                                        }
+
+                                        override fun onError(exception: ImageCaptureException) {
+                                            Log.e("TowerCamCapture", "Image capture failed", exception)
+                                        }
+                                    }
+                                )
+                            }
+                            .testTag("shutter_button"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isCapturing) {
+                            CircularProgressIndicator(
+                                color = TowerCyan,
+                                modifier = Modifier.size(36.dp),
+                                strokeWidth = 3.dp
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(58.dp)
+                                    .clip(CircleShape)
+                                    .background(TowerDark)
+                                    .border(2.dp, TowerCyanBright, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CameraAlt,
+                                    contentDescription = "Capture photo",
+                                    tint = TowerCyanBright,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    // VIDEO RECORD SHUTTER
+                    Box(
+                        modifier = Modifier
+                            .size(76.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFEF4444).copy(alpha = 0.25f))
+                            .padding(5.dp)
+                            .clip(CircleShape)
+                            .background(Color.White)
+                            .clickable {
+                                val vidCap = videoCapture ?: return@clickable
+
+                                if (isRecordingVideo) {
+                                    // Stop Video Recording
+                                    activeRecording?.stop()
+                                    activeRecording = null
+                                    viewModel.stopVideoRecordingTimer()
+                                    if (isShutterSoundEnabled) {
+                                        soundPlayer.play(MediaActionSound.STOP_VIDEO_RECORDING)
+                                    }
+                                } else {
+                                    // Start Video Recording
+                                    val fileName = "TowerCam_VID_${siteCode}_${System.currentTimeMillis()}"
+                                    val contentValues = ContentValues().apply {
+                                        put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                                        put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
+                                        put(MediaStore.MediaColumns.RELATIVE_PATH, "Movies/TowerCam")
                                     }
 
-                                    override fun onError(exception: ImageCaptureException) {
-                                        Log.e("TowerCamCapture", "Image capture failed", exception)
+                                    val mediaStoreOutput = MediaStoreOutputOptions.Builder(
+                                        context.contentResolver,
+                                        MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                                    )
+                                        .setContentValues(contentValues)
+                                        .build()
+
+                                    val pendingRecording = vidCap.output
+                                        .prepareRecording(context, mediaStoreOutput)
+                                        .apply {
+                                            if (hasAudioPermission && ContextCompat.checkSelfPermission(
+                                                    context,
+                                                    Manifest.permission.RECORD_AUDIO
+                                                ) == PackageManager.PERMISSION_GRANTED
+                                            ) {
+                                                withAudioEnabled()
+                                            }
+                                        }
+
+                                    if (isShutterSoundEnabled) {
+                                        soundPlayer.play(MediaActionSound.START_VIDEO_RECORDING)
+                                    }
+
+                                    viewModel.startVideoRecordingTimer()
+
+                                    activeRecording = pendingRecording.start(
+                                        ContextCompat.getMainExecutor(context)
+                                    ) { recordEvent ->
+                                        when (recordEvent) {
+                                            is VideoRecordEvent.Finalize -> {
+                                                viewModel.stopVideoRecordingTimer()
+                                                if (!recordEvent.hasError()) {
+                                                    Log.d("TowerCamVid", "Video saved: ${recordEvent.outputResults.outputUri}")
+                                                } else {
+                                                    Log.e("TowerCamVid", "Video error: ${recordEvent.error}")
+                                                }
+                                            }
+                                            else -> {}
+                                        }
                                     }
                                 }
+                            }
+                            .testTag("video_shutter_button"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isRecordingVideo) {
+                            // Square Stop Icon
+                            Box(
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0xFFEF4444))
                             )
-                        }
-                        .testTag("shutter_button"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (isCapturing) {
-                        CircularProgressIndicator(
-                            color = TowerCyan,
-                            modifier = Modifier.size(36.dp),
-                            strokeWidth = 3.dp
-                        )
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .size(58.dp)
-                                .clip(CircleShape)
-                                .background(TowerDark)
-                                .border(2.dp, TowerCyanBright, CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CameraAlt,
-                                contentDescription = "Capture photo",
-                                tint = TowerCyanBright,
-                                modifier = Modifier.size(28.dp)
+                        } else {
+                            // Red Solid Circle for Record Start
+                            Box(
+                                modifier = Modifier
+                                    .size(54.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFEF4444))
                             )
                         }
                     }
@@ -654,15 +1112,18 @@ fun CameraScreen(
             }
         }
 
-        // 7. Full-Screen Swipeable Photo Gallery Viewer Overlay
+        // 9. Full-Screen Swipeable Photo Gallery Viewer Overlay (with Zoom & Delete)
         if (showFullScreenGallery) {
             FullScreenGalleryViewer(
                 photos = capturedPhotos,
+                onDeletePhoto = { uriToDelete ->
+                    viewModel.deletePhoto(uriToDelete)
+                },
                 onClose = { showFullScreenGallery = false }
             )
         }
 
-        // 8. Right-Sliding Technician Profile Drawer Overlay
+        // 10. Right-Sliding Technician Profile Drawer Overlay
         AnimatedVisibility(
             visible = showProfileDrawer,
             enter = fadeIn() + slideInHorizontally(initialOffsetX = { it }),
@@ -679,7 +1140,7 @@ fun CameraScreen(
         }
     }
 
-    // 9. Quick Site Code Input Dialog
+    // 11. Quick Site Code Input Dialog
     if (showEditSiteDialog) {
         QuickEditSiteCodeDialog(
             currentSiteCode = siteCode,
@@ -690,6 +1151,328 @@ fun CameraScreen(
             }
         )
     }
+
+    // 12. Settings & Version Dialog
+    if (showSettingsDialog) {
+        SettingsDialog(
+            isShutterSoundEnabled = isShutterSoundEnabled,
+            cachedSiteCount = cachedSiteCount,
+            onToggleShutterSound = { viewModel.setShutterSoundEnabled(it) },
+            onClearCache = { viewModel.clearLocalCache() },
+            onCheckForUpdates = { viewModel.checkForUpdates(forceCheck = true) },
+            onDismiss = { showSettingsDialog = false }
+        )
+    }
+
+    // 13. Blocking Version Modal (When current app version is blocked in Firestore)
+    if (versionState is VersionState.Blocked) {
+        val blockedState = versionState as VersionState.Blocked
+        VersionBlockedDialog(
+            downloadUrl = blockedState.updateLink,
+            context = context
+        )
+    }
+}
+
+@Composable
+fun SettingsDialog(
+    isShutterSoundEnabled: Boolean,
+    cachedSiteCount: Int,
+    onToggleShutterSound: (Boolean) -> Unit,
+    onClearCache: () -> Unit,
+    onCheckForUpdates: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var showClearCacheConfirm by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = null,
+                    tint = TowerCyanBright,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "TowerCam সেটিংস",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // 1. Shutter Sound Toggle
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = if (isShutterSoundEnabled) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
+                                contentDescription = null,
+                                tint = if (isShutterSoundEnabled) TowerCyanBright else Color(0xFF94A3B8),
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "ক্যামেরা শাটার সাউন্ড",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = if (isShutterSoundEnabled) "ছবি ও ভিডিওতে ক্লিক সাউন্ড হবে" else "নীরব মোড (Mute)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF94A3B8)
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = isShutterSoundEnabled,
+                            onCheckedChange = onToggleShutterSound,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.Black,
+                                checkedTrackColor = TowerCyanBright,
+                                uncheckedThumbColor = Color(0xFF94A3B8),
+                                uncheckedTrackColor = Color(0xFF334155)
+                            ),
+                            modifier = Modifier.testTag("shutter_sound_switch")
+                        )
+                    }
+                }
+
+                // 2. Room Local Site Cache Manager
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = "স্মার্ট ক্যাশিং (Smart Caching)",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                            color = Color.White
+                        )
+                        Text(
+                            text = "লোকাল মেমোরিতে $cachedSiteCount টি সাইট সংরক্ষিত আছে। ক্যাশে থাকলে অনলাইন কুয়েরি না করে তাৎক্ষণিক ভেরিফিকেশন পাওয়া যায়।",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFCBD5E1)
+                        )
+                        OutlinedButton(
+                            onClick = { showClearCacheConfirm = true },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444)),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x66EF4444)),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(imageVector = Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("লোকাল ক্যাশ সম্পূর্ণ পরিষ্কার করুন")
+                        }
+                    }
+                }
+
+                // 3. Version & Firestore Check Section
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "অ্যাপ ভার্সন:",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color(0xFF94A3B8)
+                            )
+                            Surface(
+                                color = Color(0x2222D3EE),
+                                shape = RoundedCornerShape(6.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, TowerCyanBright)
+                            ) {
+                                Text(
+                                    text = "v1.2 (Active)",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    ),
+                                    color = TowerCyanBright,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = "র‌্যান্ডম ইন্টারভাল পলিসির মাধ্যমে ফায়ারস্টোর রিড অপ্টিমাইজড রাখা হয়।",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFF94A3B8)
+                        )
+
+                        Button(
+                            onClick = onCheckForUpdates,
+                            colors = ButtonDefaults.buttonColors(containerColor = TowerCyan, contentColor = Color.Black),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(imageVector = Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("নতুন ভার্সন চেক করুন", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = TowerCyan, contentColor = Color.Black),
+                modifier = Modifier.testTag("settings_done_button")
+            ) {
+                Text("ঠিক আছে", fontWeight = FontWeight.Bold)
+            }
+        },
+        containerColor = TowerSlate
+    )
+
+    // Clear Cache confirmation alert
+    if (showClearCacheConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearCacheConfirm = false },
+            title = { Text("ক্যাশ মুছে ফেলার নিশ্চয়তা", color = Color.White) },
+            text = {
+                Text(
+                    text = "আপনি কি নিশ্চিত লোকাল ডাটাবেজের সমস্ত সাইট কোড ক্যাশ মুছে ফেলতে চান? অনলাইন সার্ভার থেকে পুনরায় তথ্য ডাউনলোড করতে হবে।",
+                    color = Color(0xFFCBD5E1)
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onClearCache()
+                        showClearCacheConfirm = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444), contentColor = Color.White)
+                ) {
+                    Text("মুছে ফেলুন")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearCacheConfirm = false }) {
+                    Text("বাতিল", color = Color(0xFF94A3B8))
+                }
+            },
+            containerColor = TowerSlate
+        )
+    }
+}
+
+@Composable
+fun VersionBlockedDialog(
+    downloadUrl: String?,
+    context: Context
+) {
+    val targetUrl = downloadUrl ?: "https://t.me/towercamera"
+
+    AlertDialog(
+        onDismissRequest = { /* Non-dismissible */ },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = TowerAmber,
+                    modifier = Modifier.size(26.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "অ্যাপ আপডেট প্রয়োজন (v1.2)",
+                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White
+                )
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "আপনার ব্যবহৃত TowerCam সংস্করণটি কেন্দ্রীয়ভাবে বন্ধ করা হয়েছে।",
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = Color.White
+                )
+                Text(
+                    text = "নতুন ফিচার, উচ্চতর স্পিড এবং সেন্ট্রাল ডাটাবেজ সুরক্ষার জন্য টেলিগ্রাম চ্যানেল থেকে সর্বশেষ আপডেট ইনস্টল করে নিন।",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFCBD5E1)
+                )
+                Surface(
+                    color = Color(0xFF1E293B),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "ডাউনলোড লিঙ্ক:\n$targetUrl",
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = TowerCyanBright,
+                        modifier = Modifier.padding(10.dp)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    try {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl))
+                        context.startActivity(intent)
+                    } catch (e: Exception) {
+                        Log.e("TowerCamUpdate", "Failed to launch update URL", e)
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = TowerCyan, contentColor = Color.Black),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("update_now_button")
+            ) {
+                Icon(imageVector = Icons.Default.SystemUpdate, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("এখনই আপডেট করুন (Update Now)", fontWeight = FontWeight.Bold)
+            }
+        },
+        containerColor = TowerSlate
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -823,6 +1606,7 @@ fun QuickEditSiteCodeDialog(
 @Composable
 fun FullScreenGalleryViewer(
     photos: List<Uri>,
+    onDeletePhoto: (Uri) -> Unit,
     onClose: () -> Unit
 ) {
     BackHandler(onBack = onClose)
@@ -875,27 +1659,65 @@ fun FullScreenGalleryViewer(
         pageCount = { photos.size }
     )
 
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
             .testTag("full_screen_gallery_viewer")
     ) {
-        // Horizontal Pager: Page 0 is the latest photo.
-        // Swiping left moves to older photos from the right.
+        // Horizontal Pager: Page 0 is latest photo.
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxSize()
         ) { page ->
+            var scale by remember { mutableFloatStateOf(1.0f) }
+            var offsetX by remember { mutableFloatStateOf(0f) }
+            var offsetY by remember { mutableFloatStateOf(0f) }
+
             Box(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(page) {
+                        detectTransformGestures { _, pan, zoom, _ ->
+                            scale = (scale * zoom).coerceIn(1.0f, 4.0f)
+                            if (scale > 1.0f) {
+                                offsetX += pan.x
+                                offsetY += pan.y
+                            } else {
+                                offsetX = 0f
+                                offsetY = 0f
+                            }
+                        }
+                    }
+                    .pointerInput(page) {
+                        detectTapGestures(
+                            onDoubleTap = {
+                                if (scale > 1.0f) {
+                                    scale = 1.0f
+                                    offsetX = 0f
+                                    offsetY = 0f
+                                } else {
+                                    scale = 2.0f
+                                }
+                            }
+                        )
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 AsyncImage(
                     model = photos[page],
                     contentDescription = "Photo ${page + 1} of ${photos.size}",
                     contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                            translationX = offsetX
+                            translationY = offsetY
+                        }
                 )
             }
         }
@@ -943,21 +1765,42 @@ fun FullScreenGalleryViewer(
                 }
             }
 
-            // Photo Index Pill
-            Surface(
-                color = Color(0xCC0F172A),
-                shape = RoundedCornerShape(16.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x3322D3EE))
+            // Right Actions: Photo Index Pill & Delete Button
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    text = "${pagerState.currentPage + 1} / ${photos.size}",
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    ),
-                    color = TowerCyanBright,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                )
+                Surface(
+                    color = Color(0xCC0F172A),
+                    shape = RoundedCornerShape(16.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x3322D3EE))
+                ) {
+                    Text(
+                        text = "${pagerState.currentPage + 1} / ${photos.size}",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        color = TowerCyanBright,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+
+                // Delete Photo Button
+                IconButton(
+                    onClick = { showDeleteConfirm = true },
+                    colors = IconButtonDefaults.iconButtonColors(containerColor = Color(0x80EF4444)),
+                    modifier = Modifier
+                        .size(42.dp)
+                        .testTag("delete_photo_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Delete Photo",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
 
@@ -977,12 +1820,12 @@ fun FullScreenGalleryViewer(
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    text = "লোকাল স্টোরেজ: Pictures/TowerCam",
+                    text = "দুইবার ট্যাপ বা পিঞ্চ করে জুম (১x-৪x) করুন",
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                     color = Color(0xFF94A3B8)
                 )
                 if (photos.size > 1) {
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "← বামে সোয়াইপ করে পুরাতন ফটো দেখুন →",
                         style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
@@ -991,6 +1834,41 @@ fun FullScreenGalleryViewer(
                 }
             }
         }
+    }
+
+    // Delete confirmation dialog
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("ছবি ডিলিট করতে চান?", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    text = "এই ছবিটি ডিভাইস মেমোরি (Pictures/TowerCam) থেকে স্থায়ীভাবে মুছে যাবে। আপনি কি নিশ্চিত?",
+                    color = Color(0xFFCBD5E1)
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val currentUri = photos.getOrNull(pagerState.currentPage)
+                        if (currentUri != null) {
+                            onDeletePhoto(currentUri)
+                        }
+                        showDeleteConfirm = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444), contentColor = Color.White),
+                    modifier = Modifier.testTag("confirm_delete_photo_button")
+                ) {
+                    Text("মুছে ফেলুন", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("বাতিল", color = Color(0xFF94A3B8))
+                }
+            },
+            containerColor = TowerSlate
+        )
     }
 }
 
@@ -1252,7 +2130,7 @@ fun ProfileSideDrawer(
 
                     // Zero-friction reminder
                     Text(
-                        text = "💡 সাইন ইন বাধ্যতামূলক নয়: যে কোনো টেকনিশিয়ান সাইন ইন না করলেও সরাসরি ক্যামেরা দিয়ে সব ফটো তুলতে পারবেন।",
+                        text = "💡 সাইন ইন বাধ্যতামূলক নয়: যে কোনো টেকনিশিয়ান সাইন ইন না করলেও সরাসরি ক্যামেরা দিয়ে সব ফটো ও ভিডিও তুলতে পারবেন।",
                         style = MaterialTheme.typography.labelSmall,
                         color = Color(0xFF94A3B8)
                     )
@@ -1334,7 +2212,7 @@ fun ProfileSideDrawer(
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
-                                        text = "গুগল সাইন ইন সক্রিয়",
+                                        text = "গুগল সাইন ইন সক্রিয়",
                                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                                         color = TowerGreen
                                     )
@@ -1419,7 +2297,7 @@ fun ProfileSideDrawer(
 
                 // Footer
                 Text(
-                    text = "TowerCam v1.1 • Azizur Rahman Central DB",
+                    text = "TowerCam v1.2 • Azizur Rahman Central DB",
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                     color = Color(0xFF475569),
                     textAlign = TextAlign.Center,

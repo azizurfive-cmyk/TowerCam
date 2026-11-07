@@ -241,6 +241,14 @@ class TowerLocationRepository(
         }
     }
 
+    suspend fun clearLocalCache() {
+        cachedSiteDao.clearAll()
+    }
+
+    suspend fun getLocalCacheCount(): Int {
+        return cachedSiteDao.getCount()
+    }
+
     companion object {
         private const val KEY_LAST_SUBMITTED_SITE_CODE = "last_submitted_site_code"
         private const val KEY_DEVICE_UUID = "device_uuid"
