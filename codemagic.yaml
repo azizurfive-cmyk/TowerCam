@@ -36,17 +36,27 @@ workflows:
 
           cd "$CM_BUILD_DIR"
 
+          echo "Cleaning Gradle cache..."
+
+          rm -rf "$HOME/.gradle/caches/jars-9"
+          rm -rf "$HOME/.gradle/caches/transforms-3"
+          rm -rf "$HOME/.gradle/caches/transforms-4"
+
+          echo "Starting fresh Gradle build..."
+
           if [ -f "./gradlew" ]; then
             chmod +x ./gradlew
-            ./gradlew --no-daemon clean :app:assembleRelease
-          elif command -v gradle >/dev/null 2>&1; then
-            gradle --no-daemon clean :app:assembleRelease
+            ./gradlew --no-daemon \
+              --no-configuration-cache \
+              --refresh-dependencies \
+              clean :app:assembleRelease
           else
-            echo "ERROR: Gradle Wrapper and system Gradle are both missing."
-            exit 1
+            gradle --no-daemon \
+              --no-configuration-cache \
+              --refresh-dependencies \
+              clean :app:assembleRelease
           fi
 
           echo "TowerCam Release APK build completed."
-
     artifacts:
       - app/build/outputs/apk/release/*.apk
