@@ -29,37 +29,35 @@ workflows:
 
           echo "Firebase configuration prepared."
 
+      
       - name: Build TowerCam Release APK
         script: |
           set -e
 
           cd "$CM_BUILD_DIR"
 
-          echo "========== SYSTEM INFO =========="
+          echo "Downloading Gradle 8.5..."
 
-          java -version
-          gradle --version
+          curl -fL https://services.gradle.org/distributions/gradle-8.5-bin.zip -o /tmp/gradle.zip
 
-          echo "========== DISK SPACE =========="
+          unzip -q /tmp/gradle.zip -d /tmp
 
-          df -h "$HOME"
-          df -i "$HOME"
+          GRADLE=/tmp/gradle-8.5/bin/gradle
 
-          echo "========== GRADLE BUILD =========="
+          chmod +x "$GRADLE"
 
-          if [ -f "./gradlew" ]; then
-            chmod +x ./gradlew
+          echo "Checking Gradle version..."
+          "$GRADLE" --version
 
-            ./gradlew --no-daemon \
-              --no-configuration-cache \
-              --stacktrace \
-              clean :app:assembleRelease
-          else
-            gradle --no-daemon \
-              --no-configuration-cache \
-              --stacktrace \
-              clean :app:assembleRelease
-          fi
+          echo "Starting TowerCam Release Build..."
+
+          "$GRADLE" \
+            --no-daemon \
+            --no-configuration-cache \
+            --stacktrace \
+            clean :app:assembleRelease
+
+          echo "TowerCam APK build completed."
 
     artifacts:
       - app/build/outputs/apk/release/*.apk
