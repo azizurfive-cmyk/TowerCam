@@ -30,33 +30,37 @@ workflows:
 
           echo "Firebase configuration prepared."
 
-      - name: Build TowerCam Release APK
+            - name: Build TowerCam Release APK
         script: |
           set -e
 
           cd "$CM_BUILD_DIR"
 
-          echo "Cleaning Gradle cache..."
+          echo "========== SYSTEM INFO =========="
 
-          rm -rf "$HOME/.gradle/caches/jars-9"
-          rm -rf "$HOME/.gradle/caches/transforms-3"
-          rm -rf "$HOME/.gradle/caches/transforms-4"
+          java -version
+          gradle --version
 
-          echo "Starting fresh Gradle build..."
+          echo "========== DISK SPACE =========="
+
+          df -h "$HOME"
+          df -i "$HOME"
+
+          echo "========== GRADLE BUILD =========="
 
           if [ -f "./gradlew" ]; then
             chmod +x ./gradlew
+
             ./gradlew --no-daemon \
               --no-configuration-cache \
-              --refresh-dependencies \
+              --stacktrace \
               clean :app:assembleRelease
+
           else
             gradle --no-daemon \
               --no-configuration-cache \
-              --refresh-dependencies \
+              --stacktrace \
               clean :app:assembleRelease
           fi
-
-          echo "TowerCam Release APK build completed."
     artifacts:
       - app/build/outputs/apk/release/*.apk
