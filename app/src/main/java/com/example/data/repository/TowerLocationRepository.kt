@@ -107,7 +107,8 @@ class TowerLocationRepository(
         siteCode: String,
         latitude: Double,
         longitude: Double,
-        timestampStr: String
+        timestampStr: String,
+        technicianName: String? = null
     ): Result<LocationLogOutcome> {
         val sanitizedCode = siteCode.trim().uppercase()
         if (sanitizedCode.isBlank()) {
@@ -149,7 +150,7 @@ class TowerLocationRepository(
         return try {
             val docRef = db.collection(collectionName).document(sanitizedCode)
             val snapshot = docRef.get().await()
-            val technician = getTechnicianIdentifier()
+            val technician = technicianName ?: getTechnicianIdentifier()
 
             if (!snapshot.exists()) {
                 // Online document does not exist yet -> Create new site with verification = "no" and slot 1

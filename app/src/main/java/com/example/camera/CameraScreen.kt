@@ -163,12 +163,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import androidx.credentials.CredentialManager
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
-import com.example.auth.performGoogleSignIn
-import com.example.auth.performSignOut
+import com.example.auth.TelegramAuthManager
+import com.example.auth.TelegramUser
 import com.example.ui.theme.TowerAmber
 import com.example.ui.theme.TowerCyan
 import com.example.ui.theme.TowerCyanBright
@@ -176,8 +175,6 @@ import com.example.ui.theme.TowerDark
 import com.example.ui.theme.TowerGreen
 import com.example.ui.theme.TowerSlate
 import com.example.version.VersionState
-import com.google.firebase.Firebase
-import com.google.firebase.auth.auth
 import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -186,9 +183,8 @@ import kotlin.math.roundToInt
 @Composable
 fun CameraScreen(
     viewModel: CameraViewModel,
-    currentUser: com.google.firebase.auth.FirebaseUser? = null,
-    onSignInSuccess: () -> Unit = {},
-    onSignOut: () -> Unit
+    telegramAuthManager: TelegramAuthManager,
+    telegramUser: TelegramUser?
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -220,11 +216,42 @@ fun CameraScreen(
     var showSettingsDialog by remember { mutableStateOf(false) }
     val anonymousId = remember { viewModel.getAnonymousTechnicianId() }
 
-    // Shutter Sound player
-    val soundPlayer = remember { MediaActionSound() }
+    // Shutter Sound player with preloaded sound assets & debounce
+    val soundPlayer = remember {
+        MediaActionSound().apply {
+            try {
+                load(MediaActionSound.SHUTTER_CLICK)
+                load(MediaActionSound.START_VIDEO_RECORDING)
+                load(MediaActionSound.STOP_VIDEO_RECORDING)
+            } catch (e: Exception) {
+                Log.w("CameraScreen", "MediaActionSound preload warning: ${e.message}")
+            }
+        }
+    }
     DisposableEffect(Unit) {
         onDispose {
-            soundPlayer.release()
+            try {
+                soundPlayer.release()
+            } catch (e: Exception) {
+                // Ignore cleanup error
+            }
+        }
+    }
+
+    var lastSoundPlayTime by remember { mutableStateOf(0L) }
+    val playSound = remember(isShutterSoundEnabled, soundPlayer) {
+        { soundId: Int ->
+            if (isShutterSoundEnabled) {
+                val now = System.currentTimeMillis()
+                if (now - lastSoundPlayTime > 300L) {
+                    lastSoundPlayTime = now
+                    try {
+                        soundPlayer.play(soundId)
+                    } catch (e: Exception) {
+                        Log.w("CameraScreen", "Sound play exception caught: ${e.message}")
+                    }
+                }
+            }
         }
     }
 
@@ -344,9 +371,7 @@ fun CameraScreen(
             activeRecording?.stop()
             activeRecording = null
             viewModel.stopVideoRecordingTimer()
-            if (isShutterSoundEnabled) {
-                soundPlayer.play(MediaActionSound.STOP_VIDEO_RECORDING)
-            }
+            playSound(MediaActionSound.STOP_VIDEO_RECORDING)
         }
     }
 
@@ -670,13 +695,20 @@ fun CameraScreen(
                     Spacer(modifier = Modifier.width(10.dp))
 
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        // Site Code Header Row with Edit Icon right beside it
+                        // Site Code Header Row: Clickable anywhere to edit site code
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween,
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { showEditSiteDialog = true }
+                                .padding(vertical = 2.dp)
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f, fill = false)
+                            ) {
                                 Text(
                                     text = "SITE: ",
                                     style = MaterialTheme.typography.titleMedium.copy(
@@ -933,15 +965,17 @@ fun CameraScreen(
                                 val capture = imageCapture ?: return@clickable
                                 viewModel.clearStatusMessage()
 
-                                if (isShutterSoundEnabled) {
-                                    soundPlayer.play(MediaActionSound.SHUTTER_CLICK)
-                                }
+                                playSound(MediaActionSound.SHUTTER_CLICK)
 
                                 capture.takePicture(
                                     cameraExecutor,
                                     object : ImageCapture.OnImageCapturedCallback() {
                                         override fun onCaptureSuccess(image: ImageProxy) {
-                                            viewModel.processCapturedImage(image)
+                                            val technicianIdentifier = telegramUser?.let { user ->
+                                                val handle = if (!user.username.isNullOrBlank()) "@${user.username}" else "ID:${user.id}"
+                                                "${user.displayName} ($handle)"
+                                            }
+                                            viewModel.processCapturedImage(image, technicianIdentifier)
                                         }
 
                                         override fun onError(exception: ImageCaptureException) {
@@ -995,9 +1029,7 @@ fun CameraScreen(
                                     activeRecording?.stop()
                                     activeRecording = null
                                     viewModel.stopVideoRecordingTimer()
-                                    if (isShutterSoundEnabled) {
-                                        soundPlayer.play(MediaActionSound.STOP_VIDEO_RECORDING)
-                                    }
+                                    playSound(MediaActionSound.STOP_VIDEO_RECORDING)
                                 } else {
                                     // Start Video Recording
                                     val fileName = "TowerCam_VID_${siteCode}_${System.currentTimeMillis()}"
@@ -1026,9 +1058,7 @@ fun CameraScreen(
                                             }
                                         }
 
-                                    if (isShutterSoundEnabled) {
-                                        soundPlayer.play(MediaActionSound.START_VIDEO_RECORDING)
-                                    }
+                                    playSound(MediaActionSound.START_VIDEO_RECORDING)
 
                                     viewModel.startVideoRecordingTimer()
 
@@ -1077,19 +1107,19 @@ fun CameraScreen(
                     modifier = Modifier
                         .size(54.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(if (currentUser != null) Color(0x3322D3EE) else Color(0x22FFFFFF))
+                        .background(if (telegramUser != null) Color(0x33229ED9) else Color(0x22FFFFFF))
                         .border(
                             1.5.dp,
-                            if (currentUser != null) TowerCyanBright else Color(0x66FFFFFF),
+                            if (telegramUser != null) Color(0xFF229ED9) else Color(0x66FFFFFF),
                             RoundedCornerShape(12.dp)
                         )
                         .clickable { showProfileDrawer = true }
                         .testTag("profile_button"),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (currentUser?.photoUrl != null) {
+                    if (!telegramUser?.photoUrl.isNullOrBlank()) {
                         AsyncImage(
-                            model = currentUser.photoUrl,
+                            model = telegramUser.photoUrl,
                             contentDescription = "Technician Profile",
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
@@ -1098,9 +1128,9 @@ fun CameraScreen(
                         )
                     } else {
                         Icon(
-                            imageVector = if (currentUser != null) Icons.Default.AccountCircle else Icons.Default.Person,
+                            imageVector = if (telegramUser != null) Icons.Default.AccountCircle else Icons.Default.Person,
                             contentDescription = "Profile Drawer",
-                            tint = if (currentUser != null) TowerCyanBright else Color.White,
+                            tint = if (telegramUser != null) Color(0xFF229ED9) else Color.White,
                             modifier = Modifier.size(28.dp)
                         )
                     }
@@ -1112,7 +1142,7 @@ fun CameraScreen(
                             .padding(4.dp)
                             .size(10.dp)
                             .clip(CircleShape)
-                            .background(if (currentUser != null) TowerGreen else TowerAmber)
+                            .background(if (telegramUser != null) TowerGreen else TowerAmber)
                             .border(1.5.dp, Color.Black, CircleShape)
                     )
                 }
@@ -1137,12 +1167,11 @@ fun CameraScreen(
             exit = fadeOut() + slideOutHorizontally(targetOffsetX = { it })
         ) {
             ProfileSideDrawer(
-                currentUser = currentUser,
+                telegramAuthManager = telegramAuthManager,
+                telegramUser = telegramUser,
                 anonymousId = anonymousId,
                 lastSubmittedCode = lastSubmittedCode,
-                onClose = { showProfileDrawer = false },
-                onSignInSuccess = onSignInSuccess,
-                onSignOut = onSignOut
+                onClose = { showProfileDrawer = false }
             )
         }
     }
@@ -1703,53 +1732,85 @@ fun FullScreenGalleryViewer(
                 }
             }
 
+            var lastTapTime by remember(page) { mutableStateOf(0L) }
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .pointerInput(page) {
-                        detectTapGestures(
-                            onDoubleTap = {
-                                if (scale > 1.05f) {
-                                    scale = 1.0f
-                                    offsetX = 0f
-                                    offsetY = 0f
-                                } else {
-                                    scale = 2.5f
-                                }
-                            }
-                        )
-                    }
-                    .pointerInput(page, scale) {
                         awaitEachGesture {
-                            awaitFirstDown(requireUnconsumed = false)
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            val downTime = System.currentTimeMillis()
+                            var moved = false
+                            var totalPanX = 0f
+                            var totalPanY = 0f
+
                             do {
                                 val event = awaitPointerEvent()
                                 val pointerCount = event.changes.size
 
                                 if (pointerCount >= 2) {
-                                    // Pinch-to-zoom with 2 fingers
-                                    val zoom = event.calculateZoom()
+                                    moved = true
+                                    val rawZoom = event.calculateZoom()
                                     val pan = event.calculatePan()
-                                    val newScale = (scale * zoom).coerceIn(1.0f, 4.0f)
-                                    scale = newScale
-                                    if (newScale > 1.05f) {
-                                        offsetX += pan.x
-                                        offsetY += pan.y
+
+                                    // Accelerated inward pinch: When pinching in (rawZoom < 1.0f),
+                                    // accelerate zoom reduction so user can easily collapse zoom in a single stroke!
+                                    val effectiveZoom = if (rawZoom < 1.0f) {
+                                        1.0f - (1.0f - rawZoom) * 2.2f
                                     } else {
+                                        rawZoom
+                                    }
+
+                                    val newScale = (scale * effectiveZoom).coerceIn(1.0f, 4.5f)
+
+                                    // Auto-snap to 1.0x if pinched close to normal scale
+                                    if (newScale < 1.15f) {
+                                        scale = 1.0f
                                         offsetX = 0f
                                         offsetY = 0f
+                                    } else {
+                                        scale = newScale
+                                        offsetX += pan.x
+                                        offsetY += pan.y
                                     }
                                     event.changes.forEach { it.consume() }
                                 } else if (pointerCount == 1 && scale > 1.05f) {
-                                    // Single-finger pan only when zoomed in
                                     val pan = event.calculatePan()
-                                    offsetX += pan.x
-                                    offsetY += pan.y
-                                    event.changes.forEach { it.consume() }
+                                    totalPanX += kotlin.math.abs(pan.x)
+                                    totalPanY += kotlin.math.abs(pan.y)
+
+                                    if (totalPanX > 6f || totalPanY > 6f) {
+                                        moved = true
+                                        offsetX += pan.x
+                                        offsetY += pan.y
+                                        event.changes.forEach { it.consume() }
+                                    }
                                 }
-                                // When single finger and scale <= 1.05f:
-                                // Changes are NOT consumed, allowing HorizontalPager to receive swipe gestures!
                             } while (event.changes.any { it.pressed })
+
+                            val upTime = System.currentTimeMillis()
+                            val pressDuration = upTime - downTime
+
+                            // Double-tap detector: Tap without drag, duration < 350ms
+                            if (!moved && pressDuration < 350L) {
+                                val timeSinceLastTap = upTime - lastTapTime
+                                if (timeSinceLastTap < 380L) {
+                                    // DOUBLE-TAP TRIGGERED!
+                                    if (scale > 1.05f) {
+                                        // Instant zoom-out to normal 1.0x
+                                        scale = 1.0f
+                                        offsetX = 0f
+                                        offsetY = 0f
+                                    } else {
+                                        // Zoom in to 2.5x
+                                        scale = 2.5f
+                                    }
+                                    lastTapTime = 0L
+                                } else {
+                                    lastTapTime = upTime
+                                }
+                            }
                         }
                     },
                 contentAlignment = Alignment.Center
@@ -1767,6 +1828,45 @@ fun FullScreenGalleryViewer(
                             translationY = offsetY
                         }
                 )
+
+                // Quick Floating 1.0x Reset Button when zoomed in
+                AnimatedVisibility(
+                    visible = scale > 1.05f,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 96.dp, end = 16.dp)
+                ) {
+                    Surface(
+                        color = Color(0xDD0F172A),
+                        shape = RoundedCornerShape(20.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, TowerCyanBright),
+                        modifier = Modifier.clickable {
+                            scale = 1.0f
+                            offsetX = 0f
+                            offsetY = 0f
+                        }
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Reset Zoom",
+                                tint = TowerCyanBright,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "১.০x রিসেট",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -1993,18 +2093,23 @@ fun FullScreenGalleryViewer(
 
 @Composable
 fun ProfileSideDrawer(
-    currentUser: com.google.firebase.auth.FirebaseUser?,
+    telegramAuthManager: TelegramAuthManager,
+    telegramUser: TelegramUser?,
     anonymousId: String,
     lastSubmittedCode: String?,
-    onClose: () -> Unit,
-    onSignInSuccess: () -> Unit,
-    onSignOut: () -> Unit
+    onClose: () -> Unit
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val credentialManager = remember { CredentialManager.create(context) }
-    var isSigningIn by remember { mutableStateOf(false) }
-    var signInError by remember { mutableStateOf<String?>(null) }
+    val isWaitingApproval by telegramAuthManager.isWaitingApproval.collectAsStateWithLifecycle()
+    val authStatusMessage by telegramAuthManager.authStatusMessage.collectAsStateWithLifecycle()
+    val timeoutSeconds by telegramAuthManager.timeoutSecondsRemaining.collectAsStateWithLifecycle()
+    val formattedTime = remember(timeoutSeconds) {
+        val m = timeoutSeconds / 60
+        val s = timeoutSeconds % 60
+        String.format("%02d:%02d", m, s)
+    }
+
+    val telegramBlue = Color(0xFF229ED9)
 
     BackHandler(onBack = onClose)
 
@@ -2098,8 +2203,8 @@ fun ProfileSideDrawer(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // Condition 1: User is NOT signed in
-                if (currentUser == null) {
+                // Condition 1: User is NOT logged in with Telegram
+                if (telegramUser == null) {
                     // Anonymous / Device ID Card
                     Card(
                         colors = CardDefaults.cardColors(containerColor = TowerSlate),
@@ -2138,107 +2243,142 @@ fun ProfileSideDrawer(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Notice Card
+                    // Telegram Bot Optional Benefit Card
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = Color(0x22F59E0B)),
+                        colors = CardDefaults.cardColors(containerColor = Color(0x1A229ED9)),
                         shape = RoundedCornerShape(12.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x66F59E0B)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x55229ED9)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(14.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.Warning,
-                                    contentDescription = null,
-                                    tint = TowerAmber,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .background(telegramBlue, CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "✈",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
                                 Text(
-                                    text = "অননুমোদিত গেস্ট মোড",
+                                    text = "টেলিগ্রাম লগইন (ঐচ্ছিক)",
                                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = TowerAmber
+                                    color = telegramBlue
                                 )
                             }
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "আপনি সাইন ইন করেননি, দয়া করে সাইন ইন করে নিন",
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 15.sp
-                                ),
+                                text = "লগইন সম্পূর্ণ অপশনাল! লগইন ছাড়াও আপনি ক্যামেরার সব ছবি ও ভিডিও ফ্রিলি তুলতে পারবেন।",
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
                                 color = Color.White
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = "জিমেইল দিয়ে সাইন ইন করলে প্রতিটি টাওয়ারের সাইট কোড ও জিপিএস সেন্ট্রাল ডাটাবেজে আপনার অ্যাকাউন্টের অধীনে নিশ্চিতভাবে সিঙ্ক হবে।",
+                                text = "যাদের টেলিগ্রাম রয়েছে তারা লগইন করলে টেলিগ্রাম টাওয়ার লোকেশন বটের (@TowerCam_Login_bot) অতিরিক্ত ক্রেডিট সুবিধা উপভোগ করতে পারবেন।",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFFE2E8F0)
+                                color = Color(0xFFCBD5E1)
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(18.dp))
 
-                    if (signInError != null) {
+                    if (authStatusMessage != null) {
                         Text(
-                            text = signInError!!,
-                            color = MaterialTheme.colorScheme.error,
+                            text = authStatusMessage!!,
+                            color = TowerCyanBright,
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.padding(bottom = 12.dp)
                         )
                     }
 
-                    // Sign In With Google Button
-                    Button(
-                        onClick = {
-                            isSigningIn = true
-                            signInError = null
-                            performGoogleSignIn(
-                                context = context,
-                                credentialManager = credentialManager,
-                                scope = scope,
-                                onSuccess = {
-                                    isSigningIn = false
-                                    onSignInSuccess()
-                                    onClose()
-                                },
-                                onError = { err ->
-                                    isSigningIn = false
-                                    signInError = err
-                                },
-                                onCancelled = {
-                                    isSigningIn = false
-                                }
-                            )
-                        },
-                        enabled = !isSigningIn,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = TowerCyan,
-                            contentColor = Color.Black
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .testTag("drawer_google_sign_in_button")
-                    ) {
-                        if (isSigningIn) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(22.dp),
-                                color = Color.Black,
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.AccountCircle,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(20.dp)
+                    // Telegram Waiting or Action State
+                    if (isWaitingApproval) {
+                        // Countdown & Approval Waiting Box
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+                            shape = RoundedCornerShape(12.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.5.dp, telegramBlue),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                CircularProgressIndicator(
+                                    color = telegramBlue,
+                                    modifier = Modifier.size(28.dp),
+                                    strokeWidth = 3.dp
                                 )
-                                Spacer(modifier = Modifier.width(8.dp))
+                                Spacer(modifier = Modifier.height(10.dp))
                                 Text(
-                                    text = "Sign in with Google",
+                                    text = "টেলিগ্রামে অনুমোদনের অপেক্ষায়...",
+                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = Color.White
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "বট (@TowerCam_Login_bot) এ কনফার্ম করুন",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF94A3B8)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Surface(
+                                    color = Color(0x33229ED9),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Text(
+                                        text = "সময় বাকি: $formattedTime",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        color = TowerCyanBright,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(14.dp))
+                                OutlinedButton(
+                                    onClick = { telegramAuthManager.cancelWaiting() },
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF94A3B8)),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF475569)),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.height(36.dp)
+                                ) {
+                                    Text("বাতিল করুন", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+                    } else {
+                        // 1-Click Login with Telegram Button
+                        Button(
+                            onClick = {
+                                telegramAuthManager.startTelegramLogin(context)
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = telegramBlue,
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp)
+                                .testTag("drawer_telegram_login_button")
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "✈",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = Color.White
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = "Login with Telegram",
                                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
                                 )
                             }
@@ -2247,50 +2387,50 @@ fun ProfileSideDrawer(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Zero-friction reminder
+                    // Zero-barrier reminder
                     Text(
-                        text = "💡 সাইন ইন বাধ্যতামূলক নয়: যে কোনো টেকনিশিয়ান সাইন ইন না করলেও সরাসরি ক্যামেরা দিয়ে সব ফটো ও ভিডিও তুলতে পারবেন।",
+                        text = "💡 মনে রাখবেন: লগইন একদমই বাধ্যতামূলক নয়। ক্যামেরার ফটো, ভিডিও এবং সেন্ট্রাল ডাটাবেজে সাইট রেকর্ড আপনি লগইন ছাড়াই করতে পারবেন।",
                         style = MaterialTheme.typography.labelSmall,
                         color = Color(0xFF94A3B8)
                     )
                 } else {
-                    // Condition 2: User IS signed in
+                    // Condition 2: User IS logged in with Telegram
                     Card(
                         colors = CardDefaults.cardColors(containerColor = TowerSlate),
                         shape = RoundedCornerShape(14.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x4422D3EE)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x66229ED9)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(
                             modifier = Modifier.padding(16.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            // Avatar
-                            if (currentUser.photoUrl != null) {
+                            // Telegram Avatar
+                            if (!telegramUser.photoUrl.isNullOrBlank()) {
                                 AsyncImage(
-                                    model = currentUser.photoUrl,
-                                    contentDescription = "User Avatar",
+                                    model = telegramUser.photoUrl,
+                                    contentDescription = "Telegram Avatar",
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier
                                         .size(72.dp)
                                         .clip(CircleShape)
-                                        .border(2.dp, TowerCyanBright, CircleShape)
+                                        .border(2.dp, telegramBlue, CircleShape)
                                 )
                             } else {
                                 Box(
                                     modifier = Modifier
                                         .size(72.dp)
-                                        .background(Color(0x2206B6D4), CircleShape)
-                                        .border(2.dp, TowerCyanBright, CircleShape),
+                                        .background(Color(0x33229ED9), CircleShape)
+                                        .border(2.dp, telegramBlue, CircleShape),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
-                                        text = (currentUser.displayName?.take(1) ?: currentUser.email?.take(1) ?: "T").uppercase(),
+                                        text = (telegramUser.displayName.take(1)).uppercase(),
                                         style = MaterialTheme.typography.headlineMedium.copy(
                                             fontWeight = FontWeight.Bold,
                                             fontFamily = FontFamily.Monospace
                                         ),
-                                        color = TowerCyanBright
+                                        color = telegramBlue
                                     )
                                 }
                             }
@@ -2299,21 +2439,21 @@ fun ProfileSideDrawer(
 
                             // Name
                             Text(
-                                text = currentUser.displayName ?: "টেকনিশিয়ান (Technician)",
+                                text = telegramUser.displayName,
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 color = Color.White
                             )
 
-                            // Email
+                            // Username / ID
                             Text(
-                                text = currentUser.email ?: "",
+                                text = if (!telegramUser.username.isNullOrBlank()) "@${telegramUser.username}" else "Telegram ID: ${telegramUser.id}",
                                 style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-                                color = Color(0xFF94A3B8)
+                                color = telegramBlue
                             )
 
                             Spacer(modifier = Modifier.height(10.dp))
 
-                            // Connected Badge
+                            // Connected Badge with Credit Benefit
                             Surface(
                                 color = Color(0x2210B981),
                                 shape = RoundedCornerShape(20.dp),
@@ -2331,7 +2471,7 @@ fun ProfileSideDrawer(
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
-                                        text = "গুগল সাইন ইন সক্রিয়",
+                                        text = "টেলিগ্রাম বট ক্রেডিট সুবিধা সক্রিয় ✓",
                                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                                         color = TowerGreen
                                     )
@@ -2382,10 +2522,7 @@ fun ProfileSideDrawer(
                     // Sign Out Button
                     OutlinedButton(
                         onClick = {
-                            performSignOut(context, credentialManager, scope) {
-                                onSignOut()
-                                onClose()
-                            }
+                            telegramAuthManager.logout()
                         },
                         colors = ButtonDefaults.outlinedButtonColors(
                             contentColor = Color(0xFFEF4444)
@@ -2405,7 +2542,7 @@ fun ProfileSideDrawer(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "সাইন আউট (Sign Out)",
+                            text = "টেলিগ্রাম লগআউট (Sign Out)",
                             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
                         )
                     }

@@ -100,6 +100,8 @@ class VersionManager(private val context: Context) {
                 VersionState.Blocked(currentVersion, updateLink)
             } else {
                 Log.d("VersionManager", "Version $currentVersion is authorized in Firestore (Status: $status). Next check in $randomDays days.")
+                // If a Telegram technician is logged in, mark their app activity in the users collection
+                recordTelegramUserMonthlyActivity(db)
                 VersionState.Allowed(currentVersion, newNextCheckTime)
             }
 
@@ -111,6 +113,28 @@ class VersionManager(private val context: Context) {
             val fallback = getCachedVersionState()
             _versionState.value = fallback
             fallback
+        }
+    }
+
+    private fun recordTelegramUserMonthlyActivity(db: FirebaseFirestore) {
+        try {
+            val telegramPrefs = context.getSharedPreferences("tower_cam_telegram_auth", Context.MODE_PRIVATE)
+            val telegramUserId = telegramPrefs.getLong("telegram_user_id", 0L)
+            if (telegramUserId > 0L) {
+                val nowIso = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply {
+                    timeZone = java.util.TimeZone.getTimeZone("UTC")
+                }.format(java.util.Date())
+
+                db.collection("users")
+                    .document(telegramUserId.toString())
+                    .set(
+                        mapOf("last_software_update" to nowIso),
+                        com.google.firebase.firestore.SetOptions.merge()
+                    )
+                Log.d("VersionManager", "Recorded last_software_update for Telegram user $telegramUserId: $nowIso")
+            }
+        } catch (e: Exception) {
+            Log.w("VersionManager", "Could not record user monthly activity: ${e.message}")
         }
     }
 

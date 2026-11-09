@@ -1,6 +1,7 @@
 package com.example
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -8,7 +9,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,11 +35,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,9 +47,10 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import com.example.auth.AuthScreen
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.auth.TelegramAuthManager
 import com.example.camera.CameraScreen
 import com.example.camera.CameraViewModel
 import com.example.ui.theme.TowerCamTheme
@@ -59,55 +58,37 @@ import com.example.ui.theme.TowerCyan
 import com.example.ui.theme.TowerCyanBright
 import com.example.ui.theme.TowerDark
 import com.example.ui.theme.TowerSlate
-import com.google.firebase.Firebase
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.auth
-
-import androidx.lifecycle.viewmodel.compose.viewModel
 
 class MainActivity : ComponentActivity() {
+
+    private val telegramAuthManager by lazy { TelegramAuthManager(applicationContext) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        // Handle possible deep link on startup: towercam://auth
+        telegramAuthManager.handleDeepLink(intent)
+
         setContent {
             TowerCamTheme {
-                AppContent()
+                AppContent(telegramAuthManager = telegramAuthManager)
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        // Handle deep link when redirected back from Telegram: towercam://auth
+        telegramAuthManager.handleDeepLink(intent)
     }
 }
 
 @Composable
-fun AppContent() {
+fun AppContent(telegramAuthManager: TelegramAuthManager) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val credentialManager = remember { androidx.credentials.CredentialManager.create(context) }
-    var currentUser by remember { mutableStateOf(Firebase.auth.currentUser) }
-
-    // Listen to Firebase Auth state changes
-    DisposableEffect(Unit) {
-        val listener = FirebaseAuth.AuthStateListener { auth ->
-            currentUser = auth.currentUser
-        }
-        Firebase.auth.addAuthStateListener(listener)
-        onDispose {
-            Firebase.auth.removeAuthStateListener(listener)
-        }
-    }
-
-    // Silent background auto sign-in on launch (zero-friction for anyone with a Google account)
-    androidx.compose.runtime.LaunchedEffect(Unit) {
-        com.example.auth.attemptAutoSignIn(
-            context = context,
-            credentialManager = credentialManager,
-            scope = scope,
-            onSuccess = {
-                currentUser = Firebase.auth.currentUser
-            }
-        )
-    }
+    val telegramUser by telegramAuthManager.telegramUser.collectAsStateWithLifecycle()
 
     // Permissions Gate for Camera & GPS
     var hasCameraPermission by remember {
@@ -141,31 +122,25 @@ fun AppContent() {
         val cameraViewModel: CameraViewModel = viewModel()
         CameraScreen(
             viewModel = cameraViewModel,
-            currentUser = currentUser,
-            onSignInSuccess = {
-                currentUser = Firebase.auth.currentUser
-                cameraViewModel.syncPendingLocations()
-            },
-            onSignOut = {
-                currentUser = null
-            }
+            telegramAuthManager = telegramAuthManager,
+            telegramUser = telegramUser
         )
     } else {
-            PermissionRequestScreen(
-                hasCamera = hasCameraPermission,
-                hasLocation = hasLocationPermission,
-                onRequestPermissions = {
-                    permissionLauncher.launch(
-                        arrayOf(
-                            Manifest.permission.CAMERA,
-                            Manifest.permission.ACCESS_FINE_LOCATION,
-                            Manifest.permission.ACCESS_COARSE_LOCATION
-                        )
+        PermissionRequestScreen(
+            hasCamera = hasCameraPermission,
+            hasLocation = hasLocationPermission,
+            onRequestPermissions = {
+                permissionLauncher.launch(
+                    arrayOf(
+                        Manifest.permission.CAMERA,
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
                     )
-                }
-            )
-        }
+                )
+            }
+        )
     }
+}
 
 @Composable
 fun PermissionRequestScreen(

@@ -284,7 +284,7 @@ class CameraViewModel(
         }
     }
 
-    fun processCapturedImage(imageProxy: ImageProxy) {
+    fun processCapturedImage(imageProxy: ImageProxy, technicianName: String? = null) {
         val currentSite = _siteCode.value
         val currentGps = gpsLocation.value
         val captureTimestamp = getFormattedTimestamp()
@@ -325,7 +325,8 @@ class CameraViewModel(
                             siteCode = currentSite,
                             latitude = currentGps.latitude,
                             longitude = currentGps.longitude,
-                            timestampStr = captureTimestamp
+                            timestampStr = captureTimestamp,
+                            technicianName = technicianName
                         )
 
                         withContext(Dispatchers.Main) {
