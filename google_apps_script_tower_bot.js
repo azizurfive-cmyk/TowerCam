@@ -6,13 +6,13 @@
 // ============================================================================
 
 // ১. টেলিগ্রাম বট কনফিগারেশন (আপনার বটের টোকেন এখানে বসান)
-const BOT_TOKEN = "7963236746:AAEZ_PLACEHOLDER_OR_YOUR_TOKEN"; // <-- আপনার আসল বটের টোকেন এখানে রাখুন
+const BOT_TOKEN = "7963236LACEHOLDER_OR_YOUR_TOKEN"; // <-- আপনার আসল বটের টোকেন এখানে রাখুন
 const TELEGRAM_URL = "https://api.telegram.org/bot" + BOT_TOKEN;
 
 // ২. সেন্ট্রাল ফায়ারবেস/ফায়ারস্টোর কনফিগারেশন (TowerCam App Database)
-const PROJECT_ID = "gen-lang-client-0596726035";
-const DATABASE_ID = "ai-studio-android-towercam-2a10256e-9bd4-40c0-82bf-236f295f5775";
-const API_KEY = "AIzaSyCAsPuBAnVkOoLW-azpMNGevuB_L6tV6w8";
+const PROJECT_ID = "gen-lang-cl035";
+const DATABASE_ID = "ai-studio-android-tow5775";
+const API_KEY = "AIzaSyCAsPuBAw8";
 const FIRESTORE_BASE_URL = "https://firestore.googleapis.com/v1/projects/" + 
                            PROJECT_ID + "/databases/" + DATABASE_ID + "/documents";
 
