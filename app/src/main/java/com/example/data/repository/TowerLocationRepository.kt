@@ -110,12 +110,17 @@ class TowerLocationRepository(
         timestampStr: String,
         technicianName: String? = null
     ): Result<LocationLogOutcome> {
-        val sanitizedCode = siteCode.trim().uppercase()
+        val sanitizedCode = extractFirstWordSiteCode(siteCode)
         if (sanitizedCode.isBlank()) {
             return Result.failure(IllegalArgumentException("Site Code cannot be empty"))
         }
 
-        // Step 1: Check Local Cache
+        // Check if user included any additional note/remark after the first word
+        val rawInputTrimmed = siteCode.trim()
+        val hasExtraRemark = rawInputTrimmed.length > sanitizedCode.length
+        val extraRemark = if (hasExtraRemark) rawInputTrimmed.substring(sanitizedCode.length).trim() else null
+
+        // Step 1: Check Local Cache with canonical first-word site code
         val localCachedSite = try {
             cachedSiteDao.getCachedSite(sanitizedCode)
         } catch (e: Exception) {
@@ -146,7 +151,7 @@ class TowerLocationRepository(
             Log.e("TowerCamRepo", "Failed to insert into local cache", e)
         }
 
-        // Step 2: Query Online Firestore (Single Document Query)
+        // Step 2: Query Online Firestore (Single Document Query on canonical site code)
         return try {
             val docRef = db.collection(collectionName).document(sanitizedCode)
             val snapshot = docRef.get().await()
@@ -154,7 +159,7 @@ class TowerLocationRepository(
 
             if (!snapshot.exists()) {
                 // Online document does not exist yet -> Create new site with verification = "no" and slot 1
-                val newDocPayload = mapOf(
+                val newDocPayload = mutableMapOf<String, Any>(
                     "site_code" to sanitizedCode,
                     "verification" to "no",
                     "created_at" to com.google.firebase.Timestamp.now(),
@@ -163,6 +168,9 @@ class TowerLocationRepository(
                     "longitude_1" to longitude,
                     "timestamp_1" to timestampStr
                 )
+                if (!extraRemark.isNullOrBlank()) {
+                    newDocPayload["remark_1"] = extraRemark
+                }
                 docRef.set(newDocPayload).await()
                 setLastSubmittedSiteCode(sanitizedCode)
                 Log.d("TowerCamRepo", "Created new site '$sanitizedCode' with Slot 1 (verification=no)")
@@ -182,12 +190,15 @@ class TowerLocationRepository(
                         setLastSubmittedSiteCode(sanitizedCode)
                         Result.success(LocationLogOutcome.SlotsFull(sanitizedCode))
                     } else {
-                        val slotUpdate = mapOf(
+                        val slotUpdate = mutableMapOf<String, Any>(
                             "technician_$targetSlot" to technician,
                             "latitude_$targetSlot" to latitude,
                             "longitude_$targetSlot" to longitude,
                             "timestamp_$targetSlot" to timestampStr
                         )
+                        if (!extraRemark.isNullOrBlank()) {
+                            slotUpdate["remark_$targetSlot"] = extraRemark
+                        }
                         docRef.update(slotUpdate).await()
                         setLastSubmittedSiteCode(sanitizedCode)
                         Log.d("TowerCamRepo", "Updated Site '$sanitizedCode' in Slot $targetSlot")
@@ -233,7 +244,7 @@ class TowerLocationRepository(
     }
 
     suspend fun getTowerLocation(siteCode: String): Result<TowerLocation?> {
-        val sanitizedCode = siteCode.trim().uppercase()
+        val sanitizedCode = extractFirstWordSiteCode(siteCode)
         return try {
             val doc = db.collection(collectionName).document(sanitizedCode).get().await()
             Result.success(doc.toObject(TowerLocation::class.java))
@@ -253,5 +264,21 @@ class TowerLocationRepository(
     companion object {
         private const val KEY_LAST_SUBMITTED_SITE_CODE = "last_submitted_site_code"
         private const val KEY_DEVICE_UUID = "device_uuid"
+
+        /**
+         * Extracts strictly the first word as the canonical Site Code.
+         * All whitespace and subsequent words to the right are completely discarded.
+         * Examples:
+         *   "FNDGN23 RS485 DISCONNECT" -> "FNDGN23"
+         *   "FNDGN23 GP" -> "FNDGN23"
+         *   "FNSNG03 ভিতরের কেবল নষ্ট" -> "FNSNG03"
+         *   "  FNSDR11  " -> "FNSDR11"
+         */
+        fun extractFirstWordSiteCode(input: String): String {
+            val trimmed = input.trim()
+            if (trimmed.isEmpty()) return ""
+            val firstToken = trimmed.split("\\s+".toRegex()).firstOrNull().orEmpty()
+            return firstToken.uppercase()
+        }
     }
 }

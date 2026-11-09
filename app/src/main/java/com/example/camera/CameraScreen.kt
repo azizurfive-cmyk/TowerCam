@@ -201,7 +201,7 @@ fun CameraScreen(
     val statusMessage by viewModel.statusMessage.collectAsStateWithLifecycle()
     val liveTimestamp by viewModel.liveTimestamp.collectAsStateWithLifecycle()
 
-    // Version 1.2 State
+    // Version 1.3 State
     val isShutterSoundEnabled by viewModel.isShutterSoundEnabled.collectAsStateWithLifecycle()
     val captureMode by viewModel.captureMode.collectAsStateWithLifecycle()
     val isRecordingVideo by viewModel.isRecordingVideo.collectAsStateWithLifecycle()
@@ -1361,7 +1361,7 @@ fun SettingsDialog(
                                 border = androidx.compose.foundation.BorderStroke(1.dp, TowerCyanBright)
                             ) {
                                 Text(
-                                    text = "v1.2 (Active)",
+                                    text = "v1.3 (Active)",
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         fontWeight = FontWeight.Bold,
                                         fontFamily = FontFamily.Monospace
@@ -1455,7 +1455,7 @@ fun VersionBlockedDialog(
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = "অ্যাপ আপডেট প্রয়োজন (v1.2)",
+                    text = "অ্যাপ আপডেট প্রয়োজন (v1.3)",
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                     color = Color.White
                 )
@@ -2553,7 +2553,7 @@ fun ProfileSideDrawer(
 
                 // Footer
                 Text(
-                    text = "TowerCam v1.2 • Azizur Rahman Central DB",
+                    text = "TowerCam v1.3 • Azizur Rahman Central DB",
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                     color = Color(0xFF475569),
                     textAlign = TextAlign.Center,

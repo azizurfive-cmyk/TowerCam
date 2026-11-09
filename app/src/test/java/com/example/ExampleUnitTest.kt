@@ -13,10 +13,13 @@ import org.junit.Test
 class ExampleUnitTest {
 
     @Test
-    fun siteCode_sanitization_isConsistent() {
-        val raw = "  dhbdd01  "
-        val sanitized = raw.trim().uppercase()
-        assertEquals("DHBDD01", sanitized)
+    fun siteCode_firstWordExtraction_discardsSubsequentWordsAndSpaces() {
+        assertEquals("FNDGN23", com.example.data.repository.TowerLocationRepository.extractFirstWordSiteCode("FNDGN23 RS485 DISCONNECT"))
+        assertEquals("FNDGN23", com.example.data.repository.TowerLocationRepository.extractFirstWordSiteCode("FNDGN23 GP"))
+        assertEquals("FNDGN23", com.example.data.repository.TowerLocationRepository.extractFirstWordSiteCode("fndgn23 robi"))
+        assertEquals("FNSNG03", com.example.data.repository.TowerLocationRepository.extractFirstWordSiteCode("FNSNG03 ভিতরের কেবল নষ্ট"))
+        assertEquals("FNSDR11", com.example.data.repository.TowerLocationRepository.extractFirstWordSiteCode("   fnsdr11   "))
+        assertEquals("", com.example.data.repository.TowerLocationRepository.extractFirstWordSiteCode("   "))
     }
 
     @Test

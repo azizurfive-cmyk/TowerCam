@@ -261,7 +261,7 @@ class CameraViewModel(
             val result = versionManager.checkVersion(forceCheck = forceCheck)
             when (result) {
                 is VersionState.Allowed -> {
-                    showStatus("TowerCam ভার্সন v1.2 সক্রিয় এবং অনুমোদিত ✓")
+                    showStatus("TowerCam ভার্সন v${result.version} সক্রিয় এবং অনুমোদিত ✓")
                 }
                 is VersionState.Blocked -> {
                     showStatus("সতর্কতা: এই ভার্সনটি বন্ধ করা হয়েছে! আপডেট করুন")
@@ -335,19 +335,19 @@ class CameraViewModel(
                             firestoreResult.onSuccess { outcome ->
                                 when (outcome) {
                                     is com.example.data.repository.LocationLogOutcome.CacheHit -> {
-                                        showStatus("লোকাল ক্যাশে সংরক্ষিত ($currentSite) ✓")
+                                        showStatus("লোকাল ক্যাশে সংরক্ষিত (${outcome.siteCode}) ✓")
                                     }
                                     is com.example.data.repository.LocationLogOutcome.AlreadyVerified -> {
-                                        showStatus("সাইট $currentSite ভেরিফাইড (Yes) ✓")
+                                        showStatus("সাইট ${outcome.siteCode} ভেরিফাইড (Yes) ✓")
                                     }
                                     is com.example.data.repository.LocationLogOutcome.NewSiteLogged -> {
-                                        showStatus("সাইট $currentSite ডাটাবেজে যুক্ত হয়েছে (স্লট ১) ✓")
+                                        showStatus("সাইট ${outcome.siteCode} ডাটাবেজে যুক্ত হয়েছে (স্লট ১) ✓")
                                     }
                                     is com.example.data.repository.LocationLogOutcome.SlotUpdated -> {
-                                        showStatus("সাইট $currentSite ডাটাবেজে আপডেট হয়েছে (স্লট ${outcome.slotNumber}) ✓")
+                                        showStatus("সাইট ${outcome.siteCode} ডাটাবেজে আপডেট হয়েছে (স্লট ${outcome.slotNumber}) ✓")
                                     }
                                     is com.example.data.repository.LocationLogOutcome.SlotsFull -> {
-                                        showStatus("সাইট $currentSite এর ৫টি স্লটই পূর্ণ রয়েছে ✓")
+                                        showStatus("সাইট ${outcome.siteCode} এর ৫টি স্লটই পূর্ণ রয়েছে ✓")
                                     }
                                 }
                             }.onFailure { err ->
@@ -391,19 +391,19 @@ class CameraViewModel(
                 firestoreResult.onSuccess { outcome ->
                     when (outcome) {
                         is com.example.data.repository.LocationLogOutcome.CacheHit -> {
-                            showStatus("লোকাল ক্যাশে বিদ্যমান ($currentSite)")
+                            showStatus("লোকাল ক্যাশে বিদ্যমান (${outcome.siteCode})")
                         }
                         is com.example.data.repository.LocationLogOutcome.AlreadyVerified -> {
-                            showStatus("সাইট $currentSite ভেরিফাইড ✓")
+                            showStatus("সাইট ${outcome.siteCode} ভেরিফাইড ✓")
                         }
                         is com.example.data.repository.LocationLogOutcome.NewSiteLogged -> {
-                            showStatus("ক্লাউড সিঙ্ক: সাইট $currentSite যুক্ত হয়েছে (স্লট ১)")
+                            showStatus("ক্লাউড সিঙ্ক: সাইট ${outcome.siteCode} যুক্ত হয়েছে (স্লট ১)")
                         }
                         is com.example.data.repository.LocationLogOutcome.SlotUpdated -> {
-                            showStatus("ক্লাউড সিঙ্ক: সাইট $currentSite আপডেট হয়েছে (স্লট ${outcome.slotNumber})")
+                            showStatus("ক্লাউড সিঙ্ক: সাইট ${outcome.siteCode} আপডেট হয়েছে (স্লট ${outcome.slotNumber})")
                         }
                         is com.example.data.repository.LocationLogOutcome.SlotsFull -> {
-                            showStatus("ক্লাউড সিঙ্ক: সাইট $currentSite এর ৫টি স্লটই পূর্ণ")
+                            showStatus("ক্লাউড সিঙ্ক: সাইট ${outcome.siteCode} এর ৫টি স্লটই পূর্ণ")
                         }
                     }
                 }

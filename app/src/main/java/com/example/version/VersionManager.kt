@@ -22,7 +22,7 @@ sealed class VersionState {
 class VersionManager(private val context: Context) {
 
     private val prefs = context.getSharedPreferences("tower_cam_version_prefs", Context.MODE_PRIVATE)
-    val currentVersion: String = "1.2"
+    val currentVersion: String = "1.3"
 
     private val _versionState = MutableStateFlow<VersionState>(getCachedVersionState())
     val versionState: StateFlow<VersionState> = _versionState.asStateFlow()
