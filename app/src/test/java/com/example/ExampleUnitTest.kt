@@ -100,4 +100,18 @@ class ExampleUnitTest {
         assertNotNull(memoryCache["SITE_6"])
         assertNotNull(memoryCache["SITE_2"])
     }
+
+    @Test
+    fun recentSites_returnsMax5_orderedByCachedAtDesc() {
+        val sites = (1..10).map { i ->
+            CachedSite("SITE_$i", 23.0 + i, 90.0 + i, cachedAt = i * 1000L)
+        }
+        val top5 = sites.sortedByDescending { it.cachedAt }.take(5)
+        assertEquals(5, top5.size)
+        assertEquals("SITE_10", top5[0].siteCode)
+        assertEquals("SITE_9", top5[1].siteCode)
+        assertEquals("SITE_8", top5[2].siteCode)
+        assertEquals("SITE_7", top5[3].siteCode)
+        assertEquals("SITE_6", top5[4].siteCode)
+    }
 }

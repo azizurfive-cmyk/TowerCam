@@ -28,6 +28,7 @@ import androidx.camera.video.Recording
 import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
 import androidx.camera.view.PreviewView
+import com.example.data.local.CachedSite
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -58,6 +59,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -148,6 +150,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -201,7 +204,7 @@ fun CameraScreen(
     val statusMessage by viewModel.statusMessage.collectAsStateWithLifecycle()
     val liveTimestamp by viewModel.liveTimestamp.collectAsStateWithLifecycle()
 
-    // Version 1.3 State
+    // Version 1.4 State
     val isShutterSoundEnabled by viewModel.isShutterSoundEnabled.collectAsStateWithLifecycle()
     val captureMode by viewModel.captureMode.collectAsStateWithLifecycle()
     val isRecordingVideo by viewModel.isRecordingVideo.collectAsStateWithLifecycle()
@@ -209,6 +212,7 @@ fun CameraScreen(
     val zoomLevel by viewModel.zoomLevel.collectAsStateWithLifecycle()
     val versionState by viewModel.versionState.collectAsStateWithLifecycle()
     val cachedSiteCount by viewModel.cachedSiteCount.collectAsStateWithLifecycle()
+    val recentVisitedSites by viewModel.recentVisitedSites.collectAsStateWithLifecycle()
 
     var showEditSiteDialog by remember { mutableStateOf(false) }
     var showFullScreenGallery by remember { mutableStateOf(false) }
@@ -1171,6 +1175,7 @@ fun CameraScreen(
                 telegramUser = telegramUser,
                 anonymousId = anonymousId,
                 lastSubmittedCode = lastSubmittedCode,
+                recentVisitedSites = recentVisitedSites,
                 onClose = { showProfileDrawer = false }
             )
         }
@@ -1361,7 +1366,7 @@ fun SettingsDialog(
                                 border = androidx.compose.foundation.BorderStroke(1.dp, TowerCyanBright)
                             ) {
                                 Text(
-                                    text = "v1.3 (Active)",
+                                    text = "v1.4 (Active)",
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         fontWeight = FontWeight.Bold,
                                         fontFamily = FontFamily.Monospace
@@ -1455,7 +1460,7 @@ fun VersionBlockedDialog(
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = "অ্যাপ আপডেট প্রয়োজন (v1.3)",
+                    text = "অ্যাপ আপডেট প্রয়োজন (v1.4)",
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                     color = Color.White
                 )
@@ -1697,7 +1702,6 @@ fun FullScreenGalleryViewer(
 
     val scope = rememberCoroutineScope()
     var showDeleteConfirm by remember { mutableStateOf(false) }
-    var isCurrentPhotoZoomed by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -1706,26 +1710,19 @@ fun FullScreenGalleryViewer(
             .testTag("full_screen_gallery_viewer")
     ) {
         // Horizontal Pager: Page 0 is latest photo.
-        // Pager scrolling is allowed when photo is at normal scale (scale <= 1.05f).
+        // Pager scrolling is fully open and edge-aware (like native Google Photos / Gallery).
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
-            userScrollEnabled = !isCurrentPhotoZoomed
+            userScrollEnabled = true
         ) { page ->
             var scale by remember(page) { mutableFloatStateOf(1.0f) }
             var offsetX by remember(page) { mutableFloatStateOf(0f) }
             var offsetY by remember(page) { mutableFloatStateOf(0f) }
 
-            // Sync zoomed state to pager
-            LaunchedEffect(scale, pagerState.currentPage) {
-                if (pagerState.currentPage == page) {
-                    isCurrentPhotoZoomed = (scale > 1.05f)
-                }
-            }
-
-            // When page changes, reset zoom
+            // When page changes, reset zoom to normal 1.0x
             LaunchedEffect(pagerState.currentPage) {
-                if (pagerState.currentPage != page && scale > 1.05f) {
+                if (pagerState.currentPage != page && scale > 1.02f) {
                     scale = 1.0f
                     offsetX = 0f
                     offsetY = 0f
@@ -1734,136 +1731,156 @@ fun FullScreenGalleryViewer(
 
             var lastTapTime by remember(page) { mutableStateOf(0L) }
 
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(page) {
-                        awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false)
-                            val downTime = System.currentTimeMillis()
-                            var moved = false
-                            var totalPanX = 0f
-                            var totalPanY = 0f
-
-                            do {
-                                val event = awaitPointerEvent()
-                                val pointerCount = event.changes.size
-
-                                if (pointerCount >= 2) {
-                                    moved = true
-                                    val rawZoom = event.calculateZoom()
-                                    val pan = event.calculatePan()
-
-                                    // Accelerated inward pinch: When pinching in (rawZoom < 1.0f),
-                                    // accelerate zoom reduction so user can easily collapse zoom in a single stroke!
-                                    val effectiveZoom = if (rawZoom < 1.0f) {
-                                        1.0f - (1.0f - rawZoom) * 2.2f
-                                    } else {
-                                        rawZoom
-                                    }
-
-                                    val newScale = (scale * effectiveZoom).coerceIn(1.0f, 4.5f)
-
-                                    // Auto-snap to 1.0x if pinched close to normal scale
-                                    if (newScale < 1.15f) {
-                                        scale = 1.0f
-                                        offsetX = 0f
-                                        offsetY = 0f
-                                    } else {
-                                        scale = newScale
-                                        offsetX += pan.x
-                                        offsetY += pan.y
-                                    }
-                                    event.changes.forEach { it.consume() }
-                                } else if (pointerCount == 1 && scale > 1.05f) {
-                                    val pan = event.calculatePan()
-                                    totalPanX += kotlin.math.abs(pan.x)
-                                    totalPanY += kotlin.math.abs(pan.y)
-
-                                    if (totalPanX > 6f || totalPanY > 6f) {
-                                        moved = true
-                                        offsetX += pan.x
-                                        offsetY += pan.y
-                                        event.changes.forEach { it.consume() }
-                                    }
-                                }
-                            } while (event.changes.any { it.pressed })
-
-                            val upTime = System.currentTimeMillis()
-                            val pressDuration = upTime - downTime
-
-                            // Double-tap detector: Tap without drag, duration < 350ms
-                            if (!moved && pressDuration < 350L) {
-                                val timeSinceLastTap = upTime - lastTapTime
-                                if (timeSinceLastTap < 380L) {
-                                    // DOUBLE-TAP TRIGGERED!
-                                    if (scale > 1.05f) {
-                                        // Instant zoom-out to normal 1.0x
-                                        scale = 1.0f
-                                        offsetX = 0f
-                                        offsetY = 0f
-                                    } else {
-                                        // Zoom in to 2.5x
-                                        scale = 2.5f
-                                    }
-                                    lastTapTime = 0L
-                                } else {
-                                    lastTapTime = upTime
-                                }
-                            }
-                        }
-                    },
+            BoxWithConstraints(
+                modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                AsyncImage(
-                    model = photos[page],
-                    contentDescription = "Photo ${page + 1} of ${photos.size}",
-                    contentScale = ContentScale.Fit,
+                val containerWidth = constraints.maxWidth.toFloat().coerceAtLeast(1f)
+                val containerHeight = constraints.maxHeight.toFloat().coerceAtLeast(1f)
+
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .graphicsLayer {
-                            scaleX = scale
-                            scaleY = scale
-                            translationX = offsetX
-                            translationY = offsetY
-                        }
-                )
+                        .pointerInput(page) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                val downTime = System.currentTimeMillis()
+                                var moved = false
+                                var totalPanX = 0f
+                                var totalPanY = 0f
 
-                // Quick Floating 1.0x Reset Button when zoomed in
-                AnimatedVisibility(
-                    visible = scale > 1.05f,
-                    enter = fadeIn(),
-                    exit = fadeOut(),
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(top = 96.dp, end = 16.dp)
+                                do {
+                                    // PointerEventPass.Initial allows detecting multi-touch zoom immediately
+                                    // before parent pager can intercept it!
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    val pointerCount = event.changes.size
+
+                                    if (pointerCount >= 2) {
+                                        // 2-Finger Zoom & Pan: 100% open & unrestricted from 1.0x to 5.0x
+                                        moved = true
+                                        val rawZoom = event.calculateZoom()
+                                        val pan = event.calculatePan()
+
+                                        val newScale = (scale * rawZoom).coerceIn(1.0f, 5.0f)
+                                        scale = newScale
+
+                                        val maxOffsetX = ((containerWidth * (scale - 1f)) / 2f).coerceAtLeast(0f)
+                                        val maxOffsetY = ((containerHeight * (scale - 1f)) / 2f).coerceAtLeast(0f)
+
+                                        offsetX = (offsetX + pan.x).coerceIn(-maxOffsetX, maxOffsetX)
+                                        offsetY = (offsetY + pan.y).coerceIn(-maxOffsetY, maxOffsetY)
+
+                                        // Consume both fingers so pager never steals multi-touch pinch/pan
+                                        event.changes.forEach { it.consume() }
+                                    } else if (pointerCount == 1 && scale > 1.02f) {
+                                        // 1-Finger Pan when zoomed:
+                                        // Pan freely inside the photo. When hitting the edge (border),
+                                        // let unconsumed horizontal drag pass to HorizontalPager for natural swipe!
+                                        val pan = event.calculatePan()
+                                        totalPanX += kotlin.math.abs(pan.x)
+                                        totalPanY += kotlin.math.abs(pan.y)
+
+                                        if (totalPanX > 4f || totalPanY > 4f) {
+                                            moved = true
+                                            val maxOffsetX = ((containerWidth * (scale - 1f)) / 2f).coerceAtLeast(0f)
+                                            val maxOffsetY = ((containerHeight * (scale - 1f)) / 2f).coerceAtLeast(0f)
+
+                                            val targetOffsetX = offsetX + pan.x
+                                            val targetOffsetY = offsetY + pan.y
+
+                                            val clampedOffsetX = targetOffsetX.coerceIn(-maxOffsetX, maxOffsetX)
+                                            val clampedOffsetY = targetOffsetY.coerceIn(-maxOffsetY, maxOffsetY)
+
+                                            val consumedX = clampedOffsetX - offsetX
+                                            offsetX = clampedOffsetX
+                                            offsetY = clampedOffsetY
+
+                                            // If pan was consumed within the photo bounds, consume the event.
+                                            // If we reached the boundary (consumedX is ~0) and user continues pulling horizontally,
+                                            // DO NOT consume the event, allowing HorizontalPager to smoothly pull the adjacent photo!
+                                            if (kotlin.math.abs(consumedX) > 0.5f || kotlin.math.abs(pan.y) > kotlin.math.abs(pan.x)) {
+                                                event.changes.forEach { it.consume() }
+                                            }
+                                        }
+                                    }
+                                } while (event.changes.any { it.pressed })
+
+                                val upTime = System.currentTimeMillis()
+                                val pressDuration = upTime - downTime
+
+                                // Double-tap detector: Quick tap without drag (< 320ms)
+                                if (!moved && pressDuration < 320L) {
+                                    val timeSinceLastTap = upTime - lastTapTime
+                                    if (timeSinceLastTap < 350L) {
+                                        // DOUBLE-TAP: Instant smooth toggle between 1.0x and 2.5x
+                                        if (scale > 1.05f) {
+                                            scale = 1.0f
+                                            offsetX = 0f
+                                            offsetY = 0f
+                                        } else {
+                                            scale = 2.5f
+                                            offsetX = 0f
+                                            offsetY = 0f
+                                        }
+                                        lastTapTime = 0L
+                                    } else {
+                                        lastTapTime = upTime
+                                    }
+                                }
+                            }
+                        },
+                    contentAlignment = Alignment.Center
                 ) {
-                    Surface(
-                        color = Color(0xDD0F172A),
-                        shape = RoundedCornerShape(20.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, TowerCyanBright),
-                        modifier = Modifier.clickable {
-                            scale = 1.0f
-                            offsetX = 0f
-                            offsetY = 0f
-                        }
+                    AsyncImage(
+                        model = photos[page],
+                        contentDescription = "Photo ${page + 1} of ${photos.size}",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                                translationX = offsetX
+                                translationY = offsetY
+                            }
+                    )
+
+                    // Quick Floating 1.0x Reset Button when zoomed in
+                    AnimatedVisibility(
+                        visible = scale > 1.05f,
+                        enter = fadeIn(),
+                        exit = fadeOut(),
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 96.dp, end = 16.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        Surface(
+                            color = Color(0xDD0F172A),
+                            shape = RoundedCornerShape(20.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, TowerCyanBright),
+                            modifier = Modifier.clickable {
+                                scale = 1.0f
+                                offsetX = 0f
+                                offsetY = 0f
+                            }
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = "Reset Zoom",
-                                tint = TowerCyanBright,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "১.০x রিসেট",
-                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                color = Color.White
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Reset Zoom",
+                                    tint = TowerCyanBright,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "১.০x রিসেট",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = Color.White
+                                )
+                            }
                         }
                     }
                 }
@@ -2097,6 +2114,7 @@ fun ProfileSideDrawer(
     telegramUser: TelegramUser?,
     anonymousId: String,
     lastSubmittedCode: String?,
+    recentVisitedSites: List<CachedSite> = emptyList(),
     onClose: () -> Unit
 ) {
     val context = LocalContext.current
@@ -2482,37 +2500,110 @@ fun ProfileSideDrawer(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Database Information
+                    // Recent 5 Visited Sites (Loaded 100% from Local Device Room Database)
                     Card(
                         colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x3338BDF8)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text(
-                                text = "সেন্ট্রাল ডাটাবেজ তথ্য:",
-                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                color = Color(0xFF94A3B8)
-                            )
-                            Text(
-                                text = "• DB: TowerCamdatabase",
-                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                color = Color.White
-                            )
-                            Text(
-                                text = "• Collection: towergpslocation",
-                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                color = Color.White
-                            )
-                            if (lastSubmittedCode != null) {
-                                Text(
-                                    text = "• সর্বশেষ রেকর্ডকৃত সাইট: $lastSubmittedCode",
-                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                    color = TowerCyanBright
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = null,
+                                    tint = TowerCyanBright,
+                                    modifier = Modifier.size(16.dp)
                                 )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "সর্বশেষ ৫টি ভিজিট সাইট",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = Color.White
+                                )
+                                Spacer(modifier = Modifier.weight(1f))
+                                Surface(
+                                    color = Color(0x2238BDF8),
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Text(
+                                        text = "লোকাল মেমোরি",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                        color = TowerCyanBright,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+
+                            HorizontalDivider(color = Color(0x2294A3B8), thickness = 0.8.dp)
+
+                            if (recentVisitedSites.isEmpty()) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(vertical = 4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Warning,
+                                        contentDescription = null,
+                                        tint = Color(0xFF94A3B8),
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "এখনো কোনো সাইট রেকর্ড হয়নি",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color(0xFF94A3B8)
+                                    )
+                                }
+                            } else {
+                                recentVisitedSites.forEachIndexed { index, site ->
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 3.dp)
+                                    ) {
+                                        Surface(
+                                            color = Color(0x1A22D3EE),
+                                            shape = CircleShape,
+                                            modifier = Modifier.size(20.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Text(
+                                                    text = "${index + 1}",
+                                                    style = MaterialTheme.typography.labelSmall.copy(
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 10.sp
+                                                    ),
+                                                    color = TowerCyanBright
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = site.siteCode,
+                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                fontFamily = FontFamily.Monospace
+                                            ),
+                                            color = Color.White
+                                        )
+                                        Spacer(modifier = Modifier.weight(1f))
+                                        Text(
+                                            text = "${String.format(java.util.Locale.US, "%.4f", site.latitude)}, ${String.format(java.util.Locale.US, "%.4f", site.longitude)}",
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontFamily = FontFamily.Monospace,
+                                                fontSize = 10.sp
+                                            ),
+                                            color = Color(0xFF64748B)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -2553,7 +2644,7 @@ fun ProfileSideDrawer(
 
                 // Footer
                 Text(
-                    text = "TowerCam v1.3 • Azizur Rahman Central DB",
+                    text = "TowerCam v1.4 • Azizur Rahman Central DB",
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                     color = Color(0xFF475569),
                     textAlign = TextAlign.Center,

@@ -57,6 +57,8 @@ class TowerLocationRepository(
                 cache[site.siteCode] = site
             }
             override suspend fun getAllCachedSites() = cache.values.sortedByDescending { it.cachedAt }
+            override suspend fun getRecentSites(limit: Int) = cache.values.sortedByDescending { it.cachedAt }.take(limit)
+            override fun getRecentSitesFlow(limit: Int) = kotlinx.coroutines.flow.flowOf(cache.values.sortedByDescending { it.cachedAt }.take(limit))
             override suspend fun clearAll() = cache.clear()
         },
         sharedPrefs
@@ -259,6 +261,14 @@ class TowerLocationRepository(
 
     suspend fun getLocalCacheCount(): Int {
         return cachedSiteDao.getCount()
+    }
+
+    fun observeRecentSites(limit: Int = 5): Flow<List<CachedSite>> {
+        return cachedSiteDao.getRecentSitesFlow(limit)
+    }
+
+    suspend fun getRecentSites(limit: Int = 5): List<CachedSite> {
+        return cachedSiteDao.getRecentSites(limit)
     }
 
     companion object {

@@ -42,6 +42,12 @@ interface CachedSiteDao {
     @Query("SELECT * FROM cached_sites ORDER BY cached_at DESC")
     suspend fun getAllCachedSites(): List<CachedSite>
 
+    @Query("SELECT * FROM cached_sites ORDER BY cached_at DESC LIMIT :limit")
+    suspend fun getRecentSites(limit: Int = 5): List<CachedSite>
+
+    @Query("SELECT * FROM cached_sites ORDER BY cached_at DESC LIMIT :limit")
+    fun getRecentSitesFlow(limit: Int = 5): kotlinx.coroutines.flow.Flow<List<CachedSite>>
+
     @Query("DELETE FROM cached_sites")
     suspend fun clearAll()
 }
